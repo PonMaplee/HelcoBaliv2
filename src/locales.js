@@ -96,6 +96,30 @@ export const locales = {
           origin: "Pupuan",
           notes: "Fermented Wine, Jackfruit, Wild Berries",
           desc: "Our most vibrant blend featuring our strongest Liberica presence. The lowest indicator level translates to an exceptionally complex, wine-like fruitiness with a smooth, bright finish."
+        },
+        {
+          id: 'tumbler',
+          db_id: 4,
+          name: "Artisan Tumbler",
+          image250: "/product tumblr kopi.jpg",
+          image500: "/product tumblr kopi.jpg",
+          roast: "Merchandise",
+          origin: "Accessory",
+          notes: "Stainless Steel, Double Wall, Matte Black",
+          desc: "Premium stainless steel vacuum tumbler. Designed to keep your cold brew chilled for up to 12 hours or your hot coffee warm for 6 hours. Features a sleek matte black finish and a premium leather strap.",
+          isMerch: true
+        },
+        {
+          id: 'ceramic-cup',
+          db_id: 5,
+          name: "Ceramic Cup",
+          image250: "/product cangkir kopi.jpg",
+          image500: "/product cangkir kopi.jpg",
+          roast: "Merchandise",
+          origin: "Accessory",
+          notes: "Hand-crafted, Speckled Glaze, 200ml",
+          desc: "Hand-crafted ceramic mug perfect for enjoying your slow-dripped coffee. Each piece is unique with a beautiful speckled glaze and an earthy green interior.",
+          isMerch: true
         }
       ],
       labels: {
@@ -190,6 +214,30 @@ export const locales = {
           origin: "Pupuan",
           notes: "Anggur Fermentasi (Wine), Nangka, Buah Liar",
           desc: "Paduan paling eksotis dengan karakter wine dari Liberika yang amat seksi. Tingkat indikator minimal menghasilkan profil rasa buah fermentasi yang sangat kompleks dan mendalam."
+        },
+        {
+          id: 'tumbler',
+          db_id: 4,
+          name: "Artisan Tumbler",
+          image250: "/product tumblr kopi.jpg",
+          image500: "/product tumblr kopi.jpg",
+          roast: "Merchandise",
+          origin: "Aksesori",
+          notes: "Stainless Steel, Double Wall, Hitam Matte",
+          desc: "Tumbler vakum stainless steel premium. Dirancang untuk menjaga cold brew Anda tetap dingin hingga 12 jam atau kopi panas Anda tetap hangat selama 6 jam. Menampilkan warna hitam matte yang elegan dan tali kulit premium.",
+          isMerch: true
+        },
+        {
+          id: 'ceramic-cup',
+          db_id: 5,
+          name: "Ceramic Cup",
+          image250: "/product cangkir kopi.jpg",
+          image500: "/product cangkir kopi.jpg",
+          roast: "Merchandise",
+          origin: "Aksesori",
+          notes: "Buatan Tangan, Glasir Berbintik, 200ml",
+          desc: "Cangkir keramik buatan tangan yang sempurna untuk menikmati kopi Anda. Setiap produk unik dengan glasir berbintik yang indah dan bagian dalam berwarna hijau alami.",
+          isMerch: true
         }
       ],
       labels: {

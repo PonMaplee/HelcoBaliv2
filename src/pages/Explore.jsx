@@ -150,30 +150,32 @@ export default function Explore({ t, lang }) {
                 </div>
 
                 {/* Size toggle buttons */}
-                <div
-                  className={`absolute -bottom-6 ${
-                    isReversed
-                      ? '-left-4 lg:-left-6'
-                      : '-right-4 lg:-right-6'
-                  } z-20 flex shadow-xl`}
-                >
-                  {PRODUCT_SIZES.map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => selectSize(product.id, size)}
-                      className={`px-5 py-3.5 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 cursor-pointer border ${
-                        size === PRODUCT_SIZES[1] ? 'border-l-0' : ''
-                      } ${
-                        currentSize === size
-                          ? 'bg-amber-500 text-black border-amber-500'
-                          : 'bg-[#0a0a0a] text-stone-400 border-white/10 hover:text-amber-500 hover:border-amber-500/40'
-                      }`}
-                    >
-                      {size}ml
-                    </button>
-                  ))}
-                </div>
+                {!product.isMerch && (
+                  <div
+                    className={`absolute -bottom-6 ${
+                      isReversed
+                        ? '-left-4 lg:-left-6'
+                        : '-right-4 lg:-right-6'
+                    } z-20 flex shadow-xl`}
+                  >
+                    {PRODUCT_SIZES.map((size) => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => selectSize(product.id, size)}
+                        className={`px-5 py-3.5 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 cursor-pointer border ${
+                          size === PRODUCT_SIZES[1] ? 'border-l-0' : ''
+                        } ${
+                          currentSize === size
+                            ? 'bg-amber-500 text-black border-amber-500'
+                            : 'bg-[#0a0a0a] text-stone-400 border-white/10 hover:text-amber-500 hover:border-amber-500/40'
+                        }`}
+                      >
+                        {size}ml
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* ── Product info ── */}
