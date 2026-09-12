@@ -15,14 +15,31 @@
 import { Link } from 'react-router-dom';
 import NavHashLink from './NavHashLink';
 import { SOCIAL_LINKS } from '../config/social';
-import { ICON_MAP } from './SocialIcons';
+import { InstagramIcon, TikTokIcon, WhatsAppIcon } from './SocialIcons';
 
-/* ────────────────────── helpers ────────────────────── */
+const SOCIAL_ICONS = {
+  instagram: InstagramIcon,
+  tiktok: TikTokIcon,
+  whatsapp: WhatsAppIcon,
+};
 
-/** Renders a single social link with icon + label (main footer). */
-function SocialLinkRow({ url, label, iconId }) {
-  const Icon = ICON_MAP[iconId];
+function SocialLink({ url, label, iconId, variant = 'row' }) {
+  const Icon = SOCIAL_ICONS[iconId];
   if (!Icon) return null;
+
+  if (variant === 'icon') {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-stone-700 hover:text-amber-500 transition-colors duration-300"
+        aria-label={label}
+      >
+        <Icon />
+      </a>
+    );
+  }
 
   return (
     <li>
@@ -42,25 +59,6 @@ function SocialLinkRow({ url, label, iconId }) {
     </li>
   );
 }
-
-/** Renders a small icon-only social link (bottom bar). */
-function SocialLinkIcon({ url, iconId }) {
-  const Icon = ICON_MAP[iconId];
-  if (!Icon) return null;
-
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-stone-700 hover:text-amber-500 transition-colors duration-300"
-    >
-      <Icon />
-    </a>
-  );
-}
-
-/* ────────────────────── component ────────────────────── */
 
 export default function Footer({ t }) {
   return (
@@ -143,7 +141,7 @@ export default function Footer({ t }) {
             </h4>
             <ul className="space-y-4">
               {SOCIAL_LINKS.map((link) => (
-                <SocialLinkRow
+                <SocialLink
                   key={link.id}
                   url={link.url}
                   label={link.label}
@@ -164,7 +162,13 @@ export default function Footer({ t }) {
 
           <div className="flex items-center gap-6">
             {SOCIAL_LINKS.map((link) => (
-              <SocialLinkIcon key={link.id} url={link.url} iconId={link.id} />
+              <SocialLink
+                key={link.id}
+                url={link.url}
+                label={link.label}
+                iconId={link.id}
+                variant="icon"
+              />
             ))}
           </div>
         </div>

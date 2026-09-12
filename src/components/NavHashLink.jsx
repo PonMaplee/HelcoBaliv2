@@ -13,6 +13,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 
 const SCROLL_DELAY_MS = 300;
 
+const scrollToSection = (sectionId) => {
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
+};
+
 export default function NavHashLink({ to, children, className, onClick }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -22,17 +26,13 @@ export default function NavHashLink({ to, children, className, onClick }) {
     const sectionId = to.replace('/#', '');
 
     if (location.pathname === '/') {
-      const el = document.getElementById(sectionId);
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      scrollToSection(sectionId);
     } else {
       navigate('/');
-      setTimeout(() => {
-        const el = document.getElementById(sectionId);
-        if (el) el.scrollIntoView({ behavior: 'smooth' });
-      }, SCROLL_DELAY_MS);
+      setTimeout(() => scrollToSection(sectionId), SCROLL_DELAY_MS);
     }
 
-    if (onClick) onClick();
+    onClick?.();
   };
 
   return (

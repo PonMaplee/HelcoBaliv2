@@ -3,9 +3,6 @@
  *
  * Each icon is a pure presentational component that receives
  * `className` for styling (colour, size, hover transitions).
- *
- * Adding a new platform? Just export another component here
- * and register it in the `ICON_MAP` lookup at the bottom.
  */
 
 export function InstagramIcon({ className }) {
@@ -59,12 +56,3 @@ export function WhatsAppIcon({ className }) {
   );
 }
 
-/**
- * Lookup map — maps a social platform `id` (from config/social.js)
- * to its SVG icon component.
- */
-export const ICON_MAP = {
-  instagram: InstagramIcon,
-  tiktok: TikTokIcon,
-  whatsapp: WhatsAppIcon,
-};

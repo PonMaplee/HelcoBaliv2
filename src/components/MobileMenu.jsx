@@ -15,13 +15,13 @@ import { Globe, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import NavHashLink from './NavHashLink';
 
-export default function MobileMenu({ t, lang, closeMenu, toggleLang }) {
-  /* shared class for every menu link */
-  const linkClass =
-    'hover:text-amber-500 w-full py-4 border-b border-white/5 transition-colors';
+const MotionDiv = motion.div;
+const linkClass =
+  'hover:text-amber-500 w-full py-4 border-b border-white/5 transition-colors';
 
+export default function MobileMenu({ t, lang, closeMenu, toggleLang }) {
   return (
-    <motion.div
+    <MotionDiv
       initial={{ opacity: 0, x: '100%' }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: '100%' }}
@@ -30,6 +30,7 @@ export default function MobileMenu({ t, lang, closeMenu, toggleLang }) {
     >
       {/* Close button */}
       <button
+        type="button"
         onClick={closeMenu}
         className="absolute top-4 right-6 text-stone-400 hover:text-amber-500 p-2"
         aria-label="Close menu"
@@ -60,6 +61,7 @@ export default function MobileMenu({ t, lang, closeMenu, toggleLang }) {
 
         {/* Language toggle */}
         <button
+          type="button"
           onClick={() => {
             toggleLang();
             closeMenu();
@@ -70,6 +72,6 @@ export default function MobileMenu({ t, lang, closeMenu, toggleLang }) {
           <span>{lang === 'en' ? 'ID (Bahasa)' : 'EN (English)'}</span>
         </button>
       </div>
-    </motion.div>
+    </MotionDiv>
   );
 }

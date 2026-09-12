@@ -13,13 +13,14 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Coffee, MapPin } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
+import NavHashLink from '../components/NavHashLink';
 import SEO from '../components/SEO';
 import { fadeUp, staggerContainer } from '../lib/animations';
 
-/* ── Constants ── */
-const SCROLL_DELAY_MS = 300;
+const MotionDiv = motion.div;
+const PRODUCT_SIZES = ['250', '500'];
 
 /** SEO meta per language. */
 const SEO_CONTENT = {
@@ -41,8 +42,6 @@ const SEO_CONTENT = {
  * Component
  * ───────────────────────────────────────────────────────── */
 export default function Explore({ t, lang }) {
-  const navigate = useNavigate();
-
   /* Scroll to top on mount */
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -51,23 +50,8 @@ export default function Explore({ t, lang }) {
   /* ── Size toggle state (per product) ── */
   const [selectedSizes, setSelectedSizes] = useState({});
 
-  const getSize = (productId) => selectedSizes[productId] || '250';
-
-  const setSize = (productId, size) => {
+  const selectSize = (productId, size) => {
     setSelectedSizes((prev) => ({ ...prev, [productId]: size }));
-  };
-
-  /**
-   * Navigates to the home page and scrolls to the
-   * retail-outlets section after mount.
-   */
-  const handleFindRetail = (e) => {
-    e.preventDefault();
-    navigate('/');
-    setTimeout(() => {
-      const el = document.getElementById('outlets');
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
-    }, SCROLL_DELAY_MS);
   };
 
   /* ────────────────────────────────────────────────────── */
@@ -91,7 +75,7 @@ export default function Explore({ t, lang }) {
       </Link>
 
       {/* Page header */}
-      <motion.div
+      <MotionDiv
         initial="hidden"
         animate="visible"
         variants={staggerContainer}
@@ -115,18 +99,18 @@ export default function Explore({ t, lang }) {
         >
           {t.explore.desc}
         </motion.p>
-      </motion.div>
+      </MotionDiv>
 
       {/* ── Product cards ── */}
       <div className="space-y-32">
         {t.explore.products.map((product, idx) => {
-          const currentSize = getSize(product.id);
+          const currentSize = selectedSizes[product.id] ?? PRODUCT_SIZES[0];
           const currentImage =
-            currentSize === '500' ? product.image500 : product.image250;
+            currentSize === PRODUCT_SIZES[1] ? product.image500 : product.image250;
           const isReversed = idx % 2 !== 0;
 
           return (
-            <motion.div
+            <MotionDiv
               key={product.id}
               initial={{ opacity: 0, y: 50 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -164,12 +148,13 @@ export default function Explore({ t, lang }) {
                       : '-right-4 lg:-right-6'
                   } z-20 flex shadow-xl`}
                 >
-                  {['250', '500'].map((size) => (
+                  {PRODUCT_SIZES.map((size) => (
                     <button
                       key={size}
-                      onClick={() => setSize(product.id, size)}
+                      type="button"
+                      onClick={() => selectSize(product.id, size)}
                       className={`px-5 py-3.5 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 cursor-pointer border ${
-                        size === '500' ? 'border-l-0' : ''
+                        size === PRODUCT_SIZES[1] ? 'border-l-0' : ''
                       } ${
                         currentSize === size
                           ? 'bg-amber-500 text-black border-amber-500'
@@ -216,12 +201,8 @@ export default function Explore({ t, lang }) {
                 </div>
 
                 {/* Find at retail partners */}
-                <a
-                  href="/#outlets"
-                  onClick={handleFindRetail}
-                  className="inline-block mt-4"
-                >
-                  <motion.div
+                <NavHashLink to="/#outlets" className="inline-block mt-4">
+                  <MotionDiv
                     whileHover={{
                       scale: 1.05,
                       backgroundColor: '#d4af37',
@@ -232,10 +213,10 @@ export default function Explore({ t, lang }) {
                   >
                     <MapPin size={14} />
                     <span>{t.explore.labels.orderBtn}</span>
-                  </motion.div>
-                </a>
+                  </MotionDiv>
+                </NavHashLink>
               </div>
-            </motion.div>
+            </MotionDiv>
           );
         })}
       </div>
