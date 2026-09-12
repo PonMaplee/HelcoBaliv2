@@ -39,3 +39,8 @@ Thumbs.db
 # Graphify Knowledge Graph outputs & cache
 graphify-out/
 
+# Instructions & Design Analysis
+instructions.md
+DESIGN_ANALYSIS.md
+analisis design.md
+analisis\ design.md
