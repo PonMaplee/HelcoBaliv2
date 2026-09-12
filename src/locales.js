@@ -66,6 +66,7 @@ export const locales = {
       products: [
         {
           id: 'plaga',
+          db_id: 2,
           name: "La Plaga Coffee",
           image250: "/products_real/plaga-250ml.png",
           image500: "/products_real/plaga-500ml.png",
@@ -76,6 +77,7 @@ export const locales = {
         },
         {
           id: 'kintamani',
+          db_id: 1,
           name: "La Kintamani Coffee",
           image250: "/products_real/kintamani-250ml.png",
           image500: "/products_real/kintamani-500ml.png",
@@ -86,6 +88,7 @@ export const locales = {
         },
         {
           id: 'pupuan',
+          db_id: 3,
           name: "La Pupuan Coffee",
           image250: "/products_real/pupuan-250ml.png",
           image500: "/products_real/pupuan-500ml.png",
@@ -157,6 +160,7 @@ export const locales = {
       products: [
         {
           id: 'plaga',
+          db_id: 2,
           name: "La Plaga Coffee",
           image250: "/products_real/plaga-250ml.png",
           image500: "/products_real/plaga-500ml.png",
@@ -167,6 +171,7 @@ export const locales = {
         },
         {
           id: 'kintamani',
+          db_id: 1,
           name: "La Kintamani Coffee",
           image250: "/products_real/kintamani-250ml.png",
           image500: "/products_real/kintamani-500ml.png",
@@ -177,6 +182,7 @@ export const locales = {
         },
         {
           id: 'pupuan',
+          db_id: 3,
           name: "La Pupuan Coffee",
           image250: "/products_real/pupuan-250ml.png",
           image500: "/products_real/pupuan-500ml.png",

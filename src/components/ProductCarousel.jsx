@@ -1,13 +1,33 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { ArrowRight, ArrowLeft } from 'lucide-react';
 import ProductCard from './ProductCard';
-import { products as featuredProducts } from '../data/products';
 
 const SCROLL_DISTANCE = 300;
 
+/**
+ * [TAG: COMPONENT_PRODUCT_CAROUSEL]
+ * Komponen carousel (slider) yang menampilkan produk andalan di halaman Home.
+ * Mengambil datanya secara langsung dari API backend.
+ */
 export default function ProductCarousel() {
   const scrollRef = useRef(null);
+  const [featuredProducts, setFeaturedProducts] = useState([]);
 
+  /**
+   * [TAG: FETCH_FEATURED_PRODUCTS]
+   * Mengambil data produk dari backend Laravel saat komponen dimuat pertama kali.
+   */
+  useEffect(() => {
+    fetch('/api/products')
+      .then(res => res.json())
+      .then(data => setFeaturedProducts(data))
+      .catch(console.error);
+  }, []);
+
+  /**
+   * [TAG: HANDLER_SCROLL_CAROUSEL]
+   * Membantu geser scroll kiri/kanan pada UI Carousel saat tombol ditekan.
+   */
   const scrollProducts = (distance) => {
     scrollRef.current?.scrollBy({ left: distance, behavior: 'smooth' });
   };
@@ -50,7 +70,7 @@ export default function ProductCarousel() {
           >
             {featuredProducts.map((product) => (
               <div 
-                key={product.id} 
+                key={product.id ?? product._id} 
                 className="flex-none w-[calc(50%-0.5rem)] md:w-[calc(25%-1.125rem)] snap-start"
               >
                 <ProductCard product={product} />

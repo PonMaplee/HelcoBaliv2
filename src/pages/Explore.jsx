@@ -41,6 +41,11 @@ const SEO_CONTENT = {
 /* ─────────────────────────────────────────────────────────
  * Component
  * ───────────────────────────────────────────────────────── */
+/**
+ * [TAG: PAGE_EXPLORE]
+ * Halaman eksplorasi produk yang menampilkan daftar keseluruhan varian produk.
+ * Menerima properti terjemahan bahasa ({t} dan {lang}) dari locales.js.
+ */
 export default function Explore({ t, lang }) {
   /* Scroll to top on mount */
   useEffect(() => {
@@ -50,6 +55,10 @@ export default function Explore({ t, lang }) {
   /* ── Size toggle state (per product) ── */
   const [selectedSizes, setSelectedSizes] = useState({});
 
+  /**
+   * [TAG: HANDLER_SELECT_SIZE]
+   * Mengubah tampilan animasi gambar botol 250ml menjadi 500ml atau sebaliknya.
+   */
   const selectSize = (productId, size) => {
     setSelectedSizes((prev) => ({ ...prev, [productId]: size }));
   };
@@ -200,21 +209,38 @@ export default function Explore({ t, lang }) {
                   </div>
                 </div>
 
-                {/* Find at retail partners */}
-                <NavHashLink to="/#outlets" className="inline-block mt-4">
-                  <MotionDiv
-                    whileHover={{
-                      scale: 1.05,
-                      backgroundColor: '#d4af37',
-                      color: '#000',
-                    }}
-                    whileTap={{ scale: 0.95 }}
-                    className="inline-flex items-center gap-2 border border-amber-500/50 text-amber-500 px-8 py-4 text-xs font-bold uppercase tracking-[0.2em] transition-colors cursor-pointer"
-                  >
-                    <MapPin size={14} />
-                    <span>{t.explore.labels.orderBtn}</span>
-                  </MotionDiv>
-                </NavHashLink>
+                {/* Action Buttons */}
+                <div className="flex gap-4 mt-4">
+                  <Link to={`/product/${product.db_id}`}>
+                    <MotionDiv
+                      whileHover={{
+                        scale: 1.05,
+                        backgroundColor: '#d4af37',
+                        color: '#000',
+                      }}
+                      whileTap={{ scale: 0.95 }}
+                      className="inline-flex items-center gap-2 border border-amber-500/50 text-amber-500 px-8 py-4 text-xs font-bold uppercase tracking-[0.2em] transition-colors cursor-pointer"
+                    >
+                      <Coffee size={14} />
+                      <span>View Product</span>
+                    </MotionDiv>
+                  </Link>
+
+                  <NavHashLink to="/#outlets" className="inline-block">
+                    <MotionDiv
+                      whileHover={{
+                        scale: 1.05,
+                        backgroundColor: '#d4af37',
+                        color: '#000',
+                      }}
+                      whileTap={{ scale: 0.95 }}
+                      className="inline-flex items-center gap-2 border border-amber-500/50 text-amber-500 px-8 py-4 text-xs font-bold uppercase tracking-[0.2em] transition-colors cursor-pointer"
+                    >
+                      <MapPin size={14} />
+                      <span>{t.explore.labels.orderBtn}</span>
+                    </MotionDiv>
+                  </NavHashLink>
+                </div>
               </div>
             </MotionDiv>
           );

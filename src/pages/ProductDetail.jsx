@@ -1,26 +1,61 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { ArrowRight, Minus, Plus, ExternalLink } from 'lucide-react';
-import { products } from '../data/products';
 import AddToCartModal from '../components/AddToCartModal';
 import { useCart } from '../context/CartContext';
 
+/**
+ * [TAG: PAGE_PRODUCT_DETAIL]
+ * Halaman yang menampilkan informasi lengkap dari sebuah produk kopi.
+ * Menerima parameter {id} dari URL untuk melakukan fetch ke backend.
+ */
 export default function ProductDetail() {
   const { id } = useParams();
   const { addToCart, totalCount } = useCart();
-  const productId = Number.parseInt(id, 10);
-  const product = products.find((item) => item.id === productId) || products[0];
+  
+  // Mengonversi ID menjadi integer untuk dicocokkan dengan skema MongoDB (1, 2, 3...)
+  const productId = Number.parseInt(id, 10); 
 
+  const [product, setProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  /**
+   * [TAG: FETCH_PRODUCT_DETAIL]
+   * Mengambil detail produk dari Laravel API (GET /api/products/{id})
+   * Dieksekusi otomatis ketika komponen di-mount atau ketika {id} URL berubah.
+   */
+  useEffect(() => {
+    fetch(`/api/products/${productId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.message) {
+          console.error(data.message);
+          return;
+        }
+        setProduct(data);
+      })
+      .catch(console.error);
+  }, [productId]);
+
+  if (!product) return <div className="text-white pt-32 text-center">Loading...</div>;
+
   const images = product.gallery || [product.image];
 
+  /**
+   * [TAG: HANDLER_NEXT_IMAGE]
+   * Berpindah ke gambar selanjutnya di Carousel gambar sebelah kiri.
+   */
   const handleNextImage = () => {
     setCurrentImageIndex((prev) => (prev + 1) % images.length);
   };
 
+  /**
+   * [TAG: HANDLER_ADD_TO_CART]
+   * Fungsi untuk memasukkan barang ini ke keranjang global.
+   * Akan memanggil context addToCart() lalu membuka Modal konfirmasi.
+   */
   const handleAddToCart = () => {
     addToCart(product, quantity);
     setIsModalOpen(true);

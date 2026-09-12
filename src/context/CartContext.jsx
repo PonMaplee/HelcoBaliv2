@@ -1,10 +1,12 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { cartItems as defaultCartItems } from '../data/cartItems';
 
 const CartContext = createContext(null);
 
-const STORAGE_KEY = 'helcobali_cart';
-
+/**
+ * [TAG: HELPER_PARSE_PRICE]
+ * Mengubah string format harga (seperti "Rp 120.000") menjadi angka murni (120000).
+ * Berguna untuk perhitungan subtotal di dalam fungsi keranjang.
+ */
 export const parsePrice = (price) => {
   if (typeof price === 'number') return price;
   if (!price) return 0;
@@ -12,6 +14,10 @@ export const parsePrice = (price) => {
   return Number.parseInt(cleaned, 10) || 0;
 };
 
+/**
+ * [TAG: HELPER_FORMAT_IDR]
+ * Mengubah angka murni menjadi format mata uang Rupiah standar (Rp).
+ */
 export const formatIDR = (value) =>
   new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -19,63 +25,85 @@ export const formatIDR = (value) =>
     minimumFractionDigits: 0,
   }).format(value);
 
+/**
+ * [TAG: CART_PROVIDER]
+ * Provider utama yang mengontrol seluruh status (state) keranjang di frontend
+ * dan menghubungkannya dengan backend Laravel (API).
+ */
 export function CartProvider({ children }) {
-  const [cart, setCart] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return defaultCartItems;
-  });
+  const [cart, setCart] = useState([]);
+  
+  // Hardcoded session ID untuk user tanpa login (Guest)
+  const sessionId = 'guest_123'; 
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
-    } catch {
-      // ignore storage errors
-    }
-  }, [cart]);
-
-  const addToCart = (product, quantity = 1) => {
-    if (!product) return;
-    const numericPrice = parsePrice(product.price);
-    const title = product.title || product.name || 'Helco Bali Cold Brew';
-    const image = product.image || (product.gallery && product.gallery[0]) || '/placeholder.jpg';
-    const category = product.processing || product.category || 'Artisan Cold Brew';
-    const size = product.size || `${quantity} Pack${quantity > 1 ? 's' : ''}`;
-
-    setCart((prevCart) => {
-      const existingIndex = prevCart.findIndex((item) => item.id === product.id);
-
-      if (existingIndex > -1) {
-        const updated = [...prevCart];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + quantity,
-        };
-        return updated;
-      }
-
-      return [
-        ...prevCart,
-        {
-          id: product.id,
-          name: title,
-          category,
-          color: product.roast || product.notes || 'Signature Roast',
-          size,
-          price: numericPrice,
-          quantity,
-          image,
-        },
-      ];
-    });
+  /**
+   * [TAG: FETCH_CART]
+   * Mengambil data keranjang dari backend dan memetakan struktur JSON
+   * agar sesuai dengan kebutuhan tampilan frontend.
+   */
+  const fetchCart = () => {
+    fetch(`/api/cart?session_id=${sessionId}`)
+      .then(res => res.json())
+      .then(data => {
+        const mapped = data.map(item => {
+          const product = item.product || {};
+          return {
+            id: item.id || item._id, // ID keranjang (Cart Item ID)
+            productId: product.id || product._id, // ID Produk (Product ID)
+            name: product.title,
+            category: product.processing,
+            price: product.price,
+            quantity: item.quantity,
+            image: product.image,
+            roast: product.roast
+          };
+        });
+        setCart(mapped);
+      })
+      .catch(console.error);
   };
 
+  // Otomatis fetch data keranjang saat web pertama kali dimuat
+  useEffect(() => {
+    fetchCart();
+  }, []);
+
+  /**
+   * [TAG: ADD_TO_CART]
+   * Mengirim request POST ke backend untuk menambahkan produk ke database keranjang.
+   * Setelah sukses, otomatis memanggil fetchCart() untuk menyinkronkan data.
+   */
+  const addToCart = (product, quantity = 1) => {
+    const payload = {
+      product_id: product._id || product.id,
+      quantity,
+      session_id: sessionId
+    };
+    
+    fetch('/api/cart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(() => fetchCart())
+    .catch(console.error);
+  };
+
+  /**
+   * [TAG: REMOVE_ITEM]
+   * Mengirim request DELETE ke backend untuk menghapus satu produk dari keranjang.
+   */
+  const removeItem = (id) => {
+    fetch(`/api/cart/${id}`, { method: 'DELETE' })
+      .then(() => fetchCart())
+      .catch(console.error);
+  };
+
+  /**
+   * [TAG: UPDATE_QUANTITY]
+   * Mengubah jumlah barang secara lokal di frontend (optimistic update).
+   * Jika jumlahnya 0, maka item akan dihapus dari database.
+   */
   const updateQuantity = (id, newQuantity) => {
     if (newQuantity < 1) {
       removeItem(id);
@@ -88,48 +116,41 @@ export function CartProvider({ children }) {
     );
   };
 
-  const removeItem = (id) => {
-    setCart((prevCart) => prevCart.filter((item) => item.id !== id));
-  };
-
+  /**
+   * [TAG: CLEAR_CART]
+   * Mengosongkan seluruh keranjang user di backend dan me-reset state lokal.
+   * Dipanggil saat user berhasil melakukan checkout.
+   */
   const clearCart = () => {
-    setCart([]);
+    fetch(`/api/cart?session_id=${sessionId}`, { method: 'DELETE' })
+      .then(() => setCart([]))
+      .catch(console.error);
   };
 
+  // Kalkulasi total harga dan pajak
   const totalCount = cart.reduce((sum, item) => sum + (item.quantity || 1), 0);
-  const subtotal = cart.reduce(
-    (sum, item) => sum + parsePrice(item.price) * (item.quantity || 1),
-    0,
-  );
-  const deliveryFee = 0; // Free artisan delivery
+  const subtotal = cart.reduce((sum, item) => sum + parsePrice(item.price) * (item.quantity || 1), 0);
+  const deliveryFee = 0;
   const taxRate = 0.11;
   const estimatedTaxes = subtotal * taxRate;
   const total = subtotal + deliveryFee + estimatedTaxes;
 
   return (
-    <CartContext.Provider
-      value={{
-        cart,
-        addToCart,
-        updateQuantity,
-        removeItem,
-        clearCart,
-        totalCount,
-        subtotal,
-        deliveryFee,
-        estimatedTaxes,
-        total,
-      }}
-    >
+    <CartContext.Provider value={{
+      cart, addToCart, updateQuantity, removeItem, clearCart,
+      totalCount, subtotal, deliveryFee, estimatedTaxes, total,
+    }}>
       {children}
     </CartContext.Provider>
   );
 }
 
+/**
+ * [TAG: USE_CART_HOOK]
+ * Custom hook untuk memudahkan pemanggilan fungsi keranjang di komponen lain.
+ */
 export function useCart() {
   const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
+  if (!context) throw new Error('useCart must be used within a CartProvider');
   return context;
 }

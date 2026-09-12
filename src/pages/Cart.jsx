@@ -1,18 +1,39 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, MessageSquare, ShieldCheck, Sparkles } from 'lucide-react';
+import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, MessageSquare, ShieldCheck, Sparkles, CheckCircle2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useCart, formatIDR } from '../context/CartContext';
 import SEO from '../components/SEO';
 
+/**
+ * [TAG: PAGE_CART]
+ * Halaman Keranjang Belanja. Menampilkan daftar produk yang ditambahkan,
+ * subtotal, pajak, dan tombol checkout / WhatsApp.
+ */
 export default function Cart() {
   const { cart, updateQuantity, removeItem, clearCart, subtotal, deliveryFee, estimatedTaxes, total, totalCount } = useCart();
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
 
-  // WhatsApp Concierge message generator
+  /**
+   * [TAG: HANDLER_WHATSAPP_LINK]
+   * Membuat URL link WhatsApp dinamis berdasarkan isi keranjang user.
+   * Dipakai ketika user memilih "Order via WhatsApp".
+   */
   const getWhatsAppLink = () => {
     const itemList = cart
       .map((item) => `- ${item.name} (${item.size || 'Standard'}) x${item.quantity} = ${formatIDR(item.price * item.quantity)}`)
       .join('%0A');
     const message = `Halo Helco Bali! Saya ingin memesan via website:%0A%0A${itemList}%0A%0ASubtotal: ${formatIDR(subtotal)}%0AEstimasi Pajak (11%): ${formatIDR(estimatedTaxes)}%0ATotal: ${formatIDR(total)}%0A%0AMohon info ketersediaan batch fresh cold brew hari ini. Terima kasih!`;
     return `https://wa.me/6281234567890?text=${message}`;
+  };
+
+  /**
+   * [TAG: HANDLER_CHECKOUT_WEB]
+   * Dipanggil saat user menekan tombol "Proceed with Checkout" di web.
+   * Menampilkan modal pop-up konfirmasi.
+   */
+  const handleCheckout = () => {
+    setIsCheckoutModalOpen(true);
   };
 
   return (
@@ -219,7 +240,7 @@ export default function Cart() {
                   {/* Standard Checkout */}
                   <button
                     type="button"
-                    onClick={() => alert(`Thank you for your order! Our team will prepare your cold brew fresh.`)}
+                    onClick={handleCheckout}
                     className="w-full py-4 rounded-full bg-transparent border border-white/15 text-stone-300 font-bold uppercase tracking-[0.15em] text-xs hover:border-amber-500 hover:text-amber-500 hover:bg-white/5 transition-all cursor-pointer"
                   >
                     Proceed with Checkout
@@ -245,6 +266,52 @@ export default function Cart() {
         )}
 
       </div>
+
+      {/* Checkout Success Modal */}
+      <AnimatePresence>
+        {isCheckoutModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCheckoutModalOpen(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm cursor-pointer"
+            />
+            
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-[#080808] border border-white/10 rounded-3xl p-8 md:p-12 max-w-md w-full shadow-2xl text-center flex flex-col items-center"
+            >
+              <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mb-6 border border-amber-500/20 text-amber-500 shadow-[0_0_30px_rgba(212,175,55,0.2)]">
+                <CheckCircle2 size={40} />
+              </div>
+              
+              <h3 className="text-2xl font-serif italic text-white mb-4">
+                Order Received
+              </h3>
+              
+              <p className="text-sm text-stone-400 mb-8 leading-relaxed">
+                Thank you for choosing Helco Bali. Your artisan cold brew is currently being prepared and will be dispatched fresh.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCheckoutModalOpen(false);
+                  clearCart();
+                }}
+                className="w-full py-4 rounded-full bg-amber-500 text-black font-bold uppercase tracking-[0.15em] text-xs hover:bg-amber-600 hover:shadow-[0_0_20px_rgba(212,175,55,0.4)] transition-all cursor-pointer"
+              >
+                Back to Shop
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

@@ -6,7 +6,7 @@ export default function ProductCard({ product }) {
   return (
     <div 
       className="group relative flex flex-col cursor-pointer font-sans"
-      onClick={() => navigate(`/product/${product.id ?? 1}`)}
+      onClick={() => navigate(`/product/${product.id ?? product._id ?? 1}`)}
     >
       <div className="relative w-full aspect-[4/5] bg-white overflow-hidden rounded-none flex items-center justify-center">
         <img
