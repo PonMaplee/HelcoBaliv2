@@ -32,7 +32,7 @@ export default function ProductCard({ product }) {
             type="button"
             className="w-full bg-[#111111] text-white text-xs font-bold uppercase tracking-widest py-4 hover:bg-black transition-colors border-none cursor-pointer"
           >
-            Add to Cart
+            View Product Detail
           </button>
         </div>
       </div>
