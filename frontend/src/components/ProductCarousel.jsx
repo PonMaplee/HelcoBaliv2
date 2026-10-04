@@ -25,7 +25,7 @@ export default function ProductCarousel() {
       })
       .then((products) => {
         if (!Array.isArray(products)) throw new Error('Format produk tidak dikenal');
-        setFeaturedProducts(products);
+        setFeaturedProducts(products.filter((item) => item?.processing !== 'Merchandise' && item?.roast !== 'Accessory'));
         setStatus('ready');
       })
       .catch((error) => { if (error.name !== 'AbortError') setStatus('error'); });

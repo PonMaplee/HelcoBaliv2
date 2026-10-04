@@ -56,6 +56,14 @@ export default function MobileMenu({ t, lang, closeMenu, toggleLang }) {
           {t.nav.contact}
         </NavHashLink>
 
+        <Link to="/login" onClick={closeMenu} className={linkClass}>
+          {t.nav.login}
+        </Link>
+
+        <Link to="/signup" onClick={closeMenu} className={linkClass}>
+          {t.nav.signup}
+        </Link>
+
         {/* Divider */}
         <div className="w-12 h-px bg-amber-500/30 my-4" />
 

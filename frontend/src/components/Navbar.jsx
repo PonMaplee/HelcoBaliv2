@@ -64,6 +64,17 @@ export default function Navbar({ t, toggleLang, openMobileMenu, closeMenu }) {
           {t.nav.contact}
         </NavHashLink>
 
+        <Link to="/login" className={linkClass}>
+          {t.nav.login}
+        </Link>
+
+        <Link
+          to="/signup"
+          className="border border-amber-500/50 text-amber-500 px-4 py-2 hover:bg-amber-500 hover:text-black transition-all"
+        >
+          {t.nav.signup}
+        </Link>
+
         <button
           type="button"
           onClick={toggleLang}

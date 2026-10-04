@@ -477,20 +477,37 @@ export default function Home({ t }) {
             {contactAfterHospitality}
           </motion.p>
 
+          <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Link to="/login">
+              <motion.span
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="inline-flex items-center gap-3 bg-white text-black font-semibold tracking-[0.2em] uppercase px-10 py-5 hover:bg-amber-500 transition-colors duration-500 text-sm cursor-pointer"
+              >
+                {t.contact.loginBtn}
+                <ArrowRight size={16} />
+              </motion.span>
+            </Link>
+            <Link to="/signup">
+              <motion.span
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="inline-flex items-center gap-3 border border-amber-500/60 text-amber-500 font-semibold tracking-[0.2em] uppercase px-10 py-5 hover:bg-amber-500 hover:text-black transition-colors duration-500 text-sm cursor-pointer"
+              >
+                {t.contact.signupBtn}
+                <ArrowRight size={16} />
+              </motion.span>
+            </Link>
+          </motion.div>
           <motion.a
             variants={fadeUp}
-            whileHover={{
-              scale: 1.05,
-              boxShadow: '0px 0px 40px rgba(217,119,6,0.3)',
-            }}
-            whileTap={{ scale: 0.95 }}
             href={WHATSAPP_CTA}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-3 bg-white text-black font-semibold tracking-[0.2em] uppercase px-10 py-5 hover:bg-amber-500 transition-colors duration-500 text-sm"
+            className="inline-flex items-center gap-2 mt-8 text-stone-500 hover:text-amber-500 transition-colors uppercase tracking-[0.2em] text-xs font-semibold"
           >
             {t.contact.btn}
-            <ArrowRight size={16} />
+            <ArrowRight size={14} />
           </motion.a>
         </MotionDiv>
       </section>

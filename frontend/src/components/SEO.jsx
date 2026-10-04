@@ -61,7 +61,7 @@ export default function SEO({ title, description, url, image, lang = 'id' }) {
       'Artisan Coffee',
       'Balinese Coffee',
     ],
-    priceRange: 'Rp 65.000 – Rp 75.000',
+    priceRange: 'Rp 110.000 – Rp 135.000',
     menu: `${BASE_URL}/explore`,
     hasOfferCatalog: {
       '@type': 'OfferCatalog',
@@ -77,7 +77,7 @@ export default function SEO({ title, description, url, image, lang = 'id' }) {
             image: `${BASE_URL}/product-plaga.jpg`,
             offers: {
               '@type': 'Offer',
-              price: '65000',
+              price: '135000',
               priceCurrency: 'IDR',
             },
           },
@@ -92,7 +92,7 @@ export default function SEO({ title, description, url, image, lang = 'id' }) {
             image: `${BASE_URL}/product-kintamani.jpg`,
             offers: {
               '@type': 'Offer',
-              price: '75000',
+              price: '120000',
               priceCurrency: 'IDR',
             },
           },
@@ -107,7 +107,7 @@ export default function SEO({ title, description, url, image, lang = 'id' }) {
             image: `${BASE_URL}/product-pupuan.jpg`,
             offers: {
               '@type': 'Offer',
-              price: '65000',
+              price: '110000',
               priceCurrency: 'IDR',
             },
           },

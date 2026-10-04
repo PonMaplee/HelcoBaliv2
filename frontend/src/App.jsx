@@ -9,6 +9,7 @@ import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import Explore from './pages/Explore';
 import Home from './pages/Home';
+import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
 
 function AppInner() {
@@ -21,7 +22,9 @@ function AppInner() {
   const openMobileMenu = () => setIsMobileMenuOpen(true);
   const closeMenu = () => setIsMobileMenuOpen(false);
 
-  if (location.pathname === '/dashboard') return <Dashboard />;
+  if (location.pathname === '/dashboard') return <Dashboard lang={lang} />;
+  if (location.pathname === '/login') return <Auth mode="login" t={t} />;
+  if (location.pathname === '/signup') return <Auth mode="signup" t={t} />;
 
   return (
     <div className="min-h-screen bg-[#050505] text-stone-300 font-sans selection:bg-amber-500 selection:text-white overflow-x-hidden">
