@@ -23,6 +23,22 @@ backend/public/hot
 .vite/
 **/.vite/
 
+# Graphify knowledge graph (generated, large) — run `graphify .` locally to rebuild
+graphify-out/
+
+# Editor & IDE (root safety net; subfolders cover their own too)
+.vscode/
+.idea/
+.cursor/
+
+# Test / coverage cache
+coverage/
+.phpunit.cache/
+.phpunit.result.cache
+
+# Docs (semua markdown diabaikan)
+*.md
+
 # Logs & OS
 *.log
 .DS_Store

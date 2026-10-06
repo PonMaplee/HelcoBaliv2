@@ -130,6 +130,54 @@ export function daysUntil(date, now = new Date()) {
 export const sum = (items, key) => items.reduce((total, item) => total + (item[key] || 0), 0);
 export const expectedStock = (row) => row.opening + row.received - row.sold - row.damaged - row.returned;
 
+// Stok asli gerai per produk (0 bila belum ada rows). Jangan pakai fallback
+// POS_SAMPLE_PRODUCTS untuk stok — fallback hanya untuk harga/gambar.
+export function realStockFor(rows, productId, storeId = '') {
+  return sum((rows || []).filter((r) => r.productId === productId && (!storeId || r.storeId === storeId)), 'physical');
+}
+
+// List barang yang dikirim untuk 1 request: qty + batch + expires + created.
+// Scoping gerai ditangani pemanggil via request.storeId (staf hanya lihat miliknya).
+export function shipmentLines(request, production = []) {
+  const req = normalizeRequest(request);
+  const batchById = new Map((production || []).map((b) => [b.id, b]));
+  if (req.allocations && req.allocations.length) {
+    return (req.lines || []).map((line) => {
+      const allocs = req.allocations.filter((a) => a.productId === line.productId);
+      const primary = allocs[0] || {};
+      const created = primary.created
+        || (primary.batchId ? batchById.get(primary.batchId)?.created : null)
+        || req.created || null;
+      return {
+        productId: line.productId,
+        qty: line.qty,
+        batch: primary.batch || `B-${String(req.id || '').slice(0, 6).toUpperCase()}`,
+        batchId: primary.batchId || null,
+        expires: primary.expires || null,
+        created,
+        storeId: req.storeId,
+        batches: allocs.map((a) => ({
+          batchId: a.batchId || null,
+          batch: a.batch,
+          quantity: a.quantity,
+          expires: a.expires || null,
+          created: a.created || (a.batchId ? batchById.get(a.batchId)?.created : null) || req.created || null,
+        })),
+      };
+    });
+  }
+  return (req.lines || []).map((line) => ({
+    productId: line.productId,
+    qty: line.qty,
+    batch: `B-${String(req.id || '').slice(0, 6).toUpperCase()}`,
+    batchId: null,
+    expires: null,
+    created: req.created || null,
+    storeId: req.storeId,
+    batches: [],
+  }));
+}
+
 export function statusesFor(row, rows, settings, now = new Date()) {
   const statuses = [];
   const remaining = daysUntil(row.expires, now);
@@ -375,20 +423,58 @@ export function applyReceipt(data, requestId, breakdown, { date, makeId }) {
   if (error) throw new Error(error);
   const rows = data.rows.map((r) => ({ ...r }));
   const activities = [...data.activities];
+  const batchById = new Map((data.production || []).map((b) => [b.id, b]));
   for (const line of shipped) {
     const input = breakdown.find((l) => l.productId === line.productId);
     const good = Number(input?.good) || 0;
     const retur = Number(input?.retur) || 0;
     if (good > 0) {
-      const batchRef = request.allocations[0];
-      const expires = batchRef?.expires || date;
-      const batchName = batchRef?.batch || `B-${request.id.slice(0, 6).toUpperCase()}`;
-      const existing = rows.find((r) => r.storeId === request.storeId && r.productId === line.productId && r.batch === batchName);
-      if (existing) {
-        existing.physical += good;
-        existing.received += good;
+      // Alokasi per-produk (bisa pecah ke beberapa batch). Distribusikan good
+      // ke batch-batch kiriman secara berurutan supaya expires/created tepat.
+      const allocs = (request.allocations || []).filter((a) => a.productId === line.productId);
+      if (allocs.length) {
+        let remaining = good;
+        for (const alloc of allocs) {
+          if (remaining <= 0) break;
+          const portion = Math.min(alloc.quantity, remaining);
+          if (!portion) continue;
+          remaining -= portion;
+          const prod = alloc.batchId ? batchById.get(alloc.batchId) : null;
+          const expires = alloc.expires || prod?.expires || date;
+          const created = alloc.created || prod?.created || request.created || date;
+          const batchName = alloc.batch || `B-${request.id.slice(0, 6).toUpperCase()}`;
+          const existing = rows.find((r) => r.storeId === request.storeId && r.productId === line.productId && r.batch === batchName);
+          if (existing) {
+            existing.physical += portion;
+            existing.received += portion;
+            if (existing.expires !== expires) existing.expires = expires;
+          } else {
+            rows.unshift({ id: makeId(), batch: batchName, storeId: request.storeId, productId: line.productId, opening: 0, received: portion, sold: 0, damaged: 0, returned: 0, physical: portion, expires, created });
+          }
+        }
+        // Sisa pembulatan (harusnya 0 karena good <= qty terkirim) masuk ke batch pertama.
+        if (remaining > 0) {
+          const first = allocs[0];
+          const prod = first?.batchId ? batchById.get(first.batchId) : null;
+          const expires = first?.expires || prod?.expires || date;
+          const batchName = first?.batch || `B-${request.id.slice(0, 6).toUpperCase()}`;
+          const existing = rows.find((r) => r.storeId === request.storeId && r.productId === line.productId && r.batch === batchName);
+          if (existing) {
+            existing.physical += remaining;
+            existing.received += remaining;
+          } else {
+            rows.unshift({ id: makeId(), batch: batchName, storeId: request.storeId, productId: line.productId, opening: 0, received: remaining, sold: 0, damaged: 0, returned: 0, physical: remaining, expires });
+          }
+        }
       } else {
-        rows.unshift({ id: makeId(), batch: batchName, storeId: request.storeId, productId: line.productId, opening: 0, received: good, sold: 0, damaged: 0, returned: 0, physical: good, expires });
+        const batchName = `B-${request.id.slice(0, 6).toUpperCase()}`;
+        const existing = rows.find((r) => r.storeId === request.storeId && r.productId === line.productId && r.batch === batchName);
+        if (existing) {
+          existing.physical += good;
+          existing.received += good;
+        } else {
+          rows.unshift({ id: makeId(), batch: batchName, storeId: request.storeId, productId: line.productId, opening: 0, received: good, sold: 0, damaged: 0, returned: 0, physical: good, expires: date, created: request.created || date });
+        }
       }
     }
     if (retur > 0) {
@@ -415,15 +501,24 @@ export function calcShiftReport(lines, actualTotal) {
   return { expectedTotal, actualTotal: actual, difference: actual - expectedTotal };
 }
 
+function shiftQtyError(line, stock) {
+  const err = new Error(`Jumlah terjual melebihi stok gerai (${line.productId}: stok ${stock}, minta ${line.qty}).`);
+  err.productId = line.productId;
+  err.stock = stock;
+  err.requested = line.qty;
+  return err;
+}
+
 export function applyShiftReport(data, { storeId, lines, actualTotal, note, date, makeId }) {
   const clean = (lines || []).filter((l) => (l.qty || 0) > 0);
   if (!clean.length) throw new Error('Isi jumlah terjual per produk terlebih dahulu.');
   for (const line of clean) {
     if (!Number.isInteger(line.qty) || line.qty < 1) throw new Error('Jumlah terjual harus bilangan bulat ≥ 1.');
-    const stock = sum((data.rows || []).filter((r) => r.storeId === storeId && r.productId === line.productId), 'physical');
-    if (line.qty > stock) throw new Error('Jumlah terjual melebihi stok gerai.');
+    const stock = realStockFor(data.rows, line.productId, storeId);
+    if (line.qty > stock) throw shiftQtyError(line, stock);
   }
   const { expectedTotal, difference } = calcShiftReport(clean, actualTotal);
+  const reportId = makeId();
   const rows = data.rows.map((r) => ({ ...r }));
   const activities = [...data.activities];
   for (const line of clean) {
@@ -437,11 +532,11 @@ export function applyShiftReport(data, { storeId, lines, actualTotal, note, date
       row.physical -= taken;
       row.sold += taken;
       remaining -= taken;
-      activities.unshift({ id: makeId(), rowId: row.id, storeId, productId: line.productId, batch: row.batch, kind: 'terjual', quantity: taken, date, note: note || 'Tutup shift' });
+      activities.unshift({ id: makeId(), reportId, rowId: row.id, storeId, productId: line.productId, batch: row.batch, kind: 'terjual', quantity: taken, date, note: note || 'Tutup shift' });
     }
   }
   const report = {
-    id: makeId(),
+    id: reportId,
     storeId,
     date,
     lines: clean.map((l) => ({ productId: l.productId, qty: l.qty, price: l.price || 0, subtotal: (l.price || 0) * l.qty })),
@@ -449,6 +544,104 @@ export function applyShiftReport(data, { storeId, lines, actualTotal, note, date
     actualTotal: Number(actualTotal) || 0,
     difference,
     note: note || '',
+    editedAt: null,
+    editCount: 0,
   };
   return { ...data, rows, activities, shiftReports: [report, ...(data.shiftReports || [])] };
+}
+
+// Ralat laporan shift milik gerai: rollback potongan lama lalu terapkan angka baru.
+// Aman untuk shift lama karena validasi memakai stokSekarang + qtyLama per produk.
+export function reviseShiftReport(data, { reportId, storeId, lines, actualTotal, note, makeId }) {
+  const report = (data.shiftReports || []).find((s) => s.id === reportId);
+  if (!report) throw new Error('Laporan shift tidak ditemukan.');
+  if (report.storeId !== storeId) throw new Error('Laporan ini milik gerai lain.');
+  const clean = (lines || []).filter((l) => (l.qty || 0) > 0);
+  if (!clean.length) throw new Error('Isi jumlah terjual per produk terlebih dahulu.');
+  for (const line of clean) {
+    if (!Number.isInteger(line.qty) || line.qty < 1) throw new Error('Jumlah terjual harus bilangan bulat ≥ 1.');
+  }
+  const oldByProduct = new Map((report.lines || []).map((l) => [l.productId, l.qty]));
+  for (const line of clean) {
+    const oldQty = oldByProduct.get(line.productId) || 0;
+    const available = realStockFor(data.rows, line.productId, storeId) + oldQty;
+    if (line.qty > available) throw shiftQtyError(line, available);
+  }
+  // Produk yang dihapus dari ralat (qty baru 0) otomatis kembali ke stok via rollback.
+  const rows = data.rows.map((r) => ({ ...r }));
+  let activities = [...data.activities];
+  // 1. Rollback: kembalikan potongan lama ke rows, hapus activities terjual milik laporan ini.
+  const oldActivities = activities.filter((a) => a.reportId === reportId && a.kind === 'terjual');
+  if (oldActivities.length) {
+    for (const act of oldActivities) {
+      const row = rows.find((r) => r.id === act.rowId);
+      if (row) {
+        const back = Math.min(act.quantity, row.sold);
+        row.physical += back;
+        row.sold -= back;
+      } else {
+        // Row terhapus setelahnya: kembalikan ke batch sama bila masih ada.
+        const same = rows.find((r) => r.storeId === storeId && r.productId === act.productId && r.batch === act.batch);
+        if (same) {
+          same.physical += act.quantity;
+          same.sold = Math.max(0, (same.sold || 0) - act.quantity);
+        }
+      }
+    }
+    activities = activities.filter((a) => !(a.reportId === reportId && a.kind === 'terjual'));
+  } else {
+    // Data lama tanpa reportId: kembalikan ke batch sold>0 expired terdekat.
+    for (const [productId, qty] of oldByProduct) {
+      let remaining = qty;
+      const targets = rows
+        .filter((r) => r.storeId === storeId && r.productId === productId && r.sold > 0)
+        .sort((a, b) => a.expires.localeCompare(b.expires));
+      for (const row of targets) {
+        if (remaining <= 0) break;
+        const back = Math.min(row.sold, remaining);
+        row.physical += back;
+        row.sold -= back;
+        remaining -= back;
+      }
+    }
+  }
+  // 2. Terapkan angka baru (FEFO) seperti shift baru.
+  const date = report.date;
+  for (const line of clean) {
+    let remaining = line.qty;
+    const targets = rows
+      .filter((r) => r.storeId === storeId && r.productId === line.productId && r.physical > 0)
+      .sort((a, b) => a.expires.localeCompare(b.expires));
+    for (const row of targets) {
+      if (remaining <= 0) break;
+      const taken = Math.min(row.physical, remaining);
+      row.physical -= taken;
+      row.sold += taken;
+      remaining -= taken;
+      activities.unshift({ id: makeId(), reportId, rowId: row.id, storeId, productId: line.productId, batch: row.batch, kind: 'terjual', quantity: taken, date, note: note || report.note || 'Tutup shift' });
+    }
+  }
+  const { expectedTotal, difference } = calcShiftReport(clean, actualTotal);
+  const summary = (ls) => (ls || []).map((l) => `${l.productId} ${oldByProduct.get(l.productId) || 0}→${l.qty}`).join(', ');
+  activities.unshift({
+    id: makeId(), reportId, rowId: 'pos', storeId, productId: clean[0]?.productId || null,
+    batch: '-', kind: 'koreksi', quantity: 0, date,
+    note: `Ralat shift ${report.date}: ${summary(clean)}`,
+  });
+  const nextReport = {
+    ...report,
+    lines: clean.map((l) => ({ productId: l.productId, qty: l.qty, price: l.price || 0, subtotal: (l.price || 0) * l.qty })),
+    expectedTotal,
+    actualTotal: Number(actualTotal) || 0,
+    difference,
+    note: note || '',
+    editedAt: new Date().toISOString(),
+    editCount: (report.editCount || 0) + 1,
+  };
+  return {
+    ...data,
+    rows,
+    activities,
+    shiftReports: (data.shiftReports || []).map((s) => (s.id === reportId ? nextReport : s)),
+  };
 }

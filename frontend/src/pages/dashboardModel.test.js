@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allocateFEFO, allocateLinesFEFO, applyReceipt, applyShiftReport, approveRequestToProduction, approveStore, buildPosRequest, calcPosChange, calcPosTotals, calcShiftReport, CENTRAL_CATALOG, groupBatchesByRequest, loginUser, newDashboardData, normalizeRequest, posCatalog, POS_SAMPLE_PRODUCTS, productInUse, rejectStore, restoreDashboardData, seedCentralCatalog, signupUser, statusesFor, validateReceiptLines } from './dashboardModel.js';
+import { allocateFEFO, allocateLinesFEFO, applyReceipt, applyShiftReport, approveRequestToProduction, approveStore, buildPosRequest, calcPosChange, calcPosTotals, calcShiftReport, CENTRAL_CATALOG, groupBatchesByRequest, loginUser, newDashboardData, normalizeRequest, posCatalog, POS_SAMPLE_PRODUCTS, productInUse, realStockFor, rejectStore, restoreDashboardData, reviseShiftReport, seedCentralCatalog, shipmentLines, signupUser, statusesFor, validateReceiptLines } from './dashboardModel.js';
 
 let seq = 0;
 const makeId = () => `test-id-${seq++}`;
@@ -154,4 +154,57 @@ test('POS catalog falls back to sample products and totals include 11% tax', () 
   assert.equal(totals.total, 300000 + totals.tax);
   assert.equal(calcPosChange(350000, totals.total), 350000 - totals.total);
   assert.equal(calcPosTotals(cart, 999999999).discount, 325000);
+});
+
+test('new store has zero real stock and receipt adds per-product batches', () => {
+  let data = restoreDashboardData(null);
+  assert.equal(realStockFor([], 'p1', 's1'), 0);
+  assert.equal(realStockFor(data.rows, 'p1', 's1'), 0);
+  const cart = [
+    { productId: 'p1', qty: 6, price: 10000 },
+    { productId: 'p2', qty: 4, price: 20000 },
+  ];
+  const req = buildPosRequest({ storeId: 's1', cartDetailed: cart, customer: 'Walk-in', method: 'Transfer', totals: { subtotal: 140000, discount: 0, tax: 15400, total: 155400 }, receiptId: 'R1', date: '2026-10-04', makeId });
+  data = { ...data, requests: [req] };
+  const prod = approveRequestToProduction(data, req.id, { expires: '2026-12-01', makeId, date: '2026-10-04' });
+  // Tandai siap kirim lalu kirim via alokasi FEFO manual
+  const ready = { ...prod.data, production: prod.data.production.map((b) => ({ ...b, status: 'Siap kirim' })) };
+  const reqLines = ready.requests[0];
+  const shipped = {
+    ...ready,
+    production: ready.production.map((b) => ({ ...b, available: 0 })),
+    requests: [{ ...reqLines, status: 'Dikirim', allocations: ready.production.map((b) => ({ batchId: b.id, batch: b.batch, quantity: b.quantity, expires: b.expires, created: b.created, productId: b.productId })) }],
+  };
+  const lines = shipmentLines(shipped.requests[0], shipped.production);
+  assert.equal(lines.length, 2);
+  assert.ok(lines.every((l) => l.batch && l.expires === '2026-12-01' && l.created === '2026-10-04'));
+  const received = applyReceipt(shipped, req.id, [{ productId: 'p1', good: 6, retur: 0 }, { productId: 'p2', good: 3, retur: 1 }], { date: '2026-10-05', makeId });
+  assert.equal(realStockFor(received.rows, 'p1', 's1'), 6);
+  assert.equal(realStockFor(received.rows, 'p2', 's1'), 3);
+  assert.equal(realStockFor(received.rows, 'p1', 's2'), 0);
+});
+
+test('shift subtracts stock and per-product error names the culprit', () => {
+  let data = restoreDashboardData(null);
+  data = { ...data, rows: [{ id: 'row1', batch: 'B1', storeId: 's1', productId: 'p1', opening: 10, received: 0, sold: 0, damaged: 0, returned: 0, physical: 10, expires: '2026-12-01' }] };
+  const ok = applyShiftReport(data, { storeId: 's1', lines: [{ productId: 'p1', qty: 4, price: 1000 }], actualTotal: 4000, note: '', date: '2026-10-04', makeId });
+  assert.equal(realStockFor(ok.rows, 'p1', 's1'), 6);
+  assert.equal(ok.shiftReports[0].lines[0].qty, 4);
+  assert.ok(ok.activities.some((a) => a.reportId === ok.shiftReports[0].id));
+  assert.throws(() => applyShiftReport(ok, { storeId: 's1', lines: [{ productId: 'p1', qty: 99, price: 1000 }], actualTotal: 0, note: '', date: '2026-10-04', makeId }), (err) => err.productId === 'p1' && /melebihi stok/.test(err.message));
+});
+
+test('shift revision rolls back and reapplies with audit trail', () => {
+  let data = restoreDashboardData(null);
+  data = { ...data, rows: [{ id: 'row1', batch: 'B1', storeId: 's1', productId: 'p1', opening: 10, received: 0, sold: 0, damaged: 0, returned: 0, physical: 10, expires: '2026-12-01' }] };
+  const first = applyShiftReport(data, { storeId: 's1', lines: [{ productId: 'p1', qty: 8, price: 1000 }], actualTotal: 8000, note: 'salah?', date: '2026-10-04', makeId });
+  assert.equal(realStockFor(first.rows, 'p1', 's1'), 2);
+  const reportId = first.shiftReports[0].id;
+  const revised = reviseShiftReport(first, { reportId, storeId: 's1', lines: [{ productId: 'p1', qty: 5, price: 1000 }], actualTotal: 5000, note: 'ralat', makeId });
+  assert.equal(realStockFor(revised.rows, 'p1', 's1'), 5);
+  assert.equal(revised.shiftReports[0].lines[0].qty, 5);
+  assert.equal(revised.shiftReports[0].editCount, 1);
+  assert.ok(revised.activities.some((a) => a.kind === 'koreksi'));
+  assert.throws(() => reviseShiftReport(revised, { reportId, storeId: 's1', lines: [{ productId: 'p1', qty: 99, price: 1000 }], actualTotal: 0, note: '', makeId }), /melebihi stok/);
+  assert.throws(() => reviseShiftReport(revised, { reportId, storeId: 's2', lines: [{ productId: 'p1', qty: 1, price: 1000 }], actualTotal: 0, note: '', makeId }), /milik gerai lain/);
 });

@@ -8,8 +8,9 @@ import {
   approveRequestToProduction, approveStore, buildPosRequest, calcPosChange, calcPosTotals,
   calcShiftReport, daysUntil, expectedStock, findUserByEmail, groupBatchesByRequest,
   newDashboardData, normalizeRequest, normalizeProduct, posCatalog, POS_PAY_METHODS,
-  POS_SAMPLE_PRODUCTS, PRODUCT_IMAGE_CHOICES, productInUse, rejectStore, restoreDashboardData,
-  seedCentralCatalog, statusesFor, sum, todayISO,
+  POS_SAMPLE_PRODUCTS, PRODUCT_IMAGE_CHOICES, productInUse, realStockFor, rejectStore,
+  restoreDashboardData, reviseShiftReport, seedCentralCatalog, shipmentLines, statusesFor,
+  sum, todayISO,
 } from './dashboardModel';
 import { dashboardLocales } from '../locales';
 import './Dashboard.css';
@@ -267,13 +268,16 @@ export default function Dashboard() {
   }).sort((a, b) => a.expires.localeCompare(b.expires));
 
   // ---- Pesan Stok (order B2B: tanpa validasi stok, bayar di muka) ----
+  // Stok tampil = stok asli gerai (0 bila belum ada rows). Fallback sampel hanya
+  // untuk harga/gambar, bukan stok — gerai baru harus nol semua.
   const posBaseRaw = posCatalog(products, scopedRows, selectedStore);
   const posUsingSample = products.length === 0;
   const posBaseCatalog = posBaseRaw.map((item, index) => {
     if (posUsingSample) return { ...item, shortId: index + 1, sample: true };
     const sampleFallback = POS_SAMPLE_PRODUCTS[index % POS_SAMPLE_PRODUCTS.length];
-    return { ...item, price: item.price ?? sampleFallback.price, stock: item.stock ?? sampleFallback.stock, shortId: index + 1, sample: !!item.fallbackStock };
+    return { ...item, price: item.price ?? sampleFallback.price, stock: item.stock ?? 0, shortId: index + 1, sample: !!item.fallbackStock };
   });
+  const realStockOf = (productId) => realStockFor(data.rows, productId, selectedStore);
   const posQueryNorm = posQuery.toLocaleLowerCase('id-ID').trim();
   const posList = !posQueryNorm ? posBaseCatalog : posBaseCatalog.filter((item) => item.name.toLocaleLowerCase('id-ID').includes(posQueryNorm));
   const cartDetailed = cart.map((line) => {
@@ -387,6 +391,21 @@ export default function Dashboard() {
       setModal(null);
       setNotice(t.receivedSaved);
       return;
+    } else if (type === 'shiftEdit') {
+      try {
+        const next = reviseShiftReport(dataRef.current, {
+          reportId: form.reportId,
+          storeId: selectedStore,
+          lines: (form.lines || []).map((l) => ({ productId: l.productId, qty: Number(l.qty) || 0, price: l.price || 0 })),
+          actualTotal: Number(form.actualTotal) || 0,
+          note: String(form.note || '').trim(),
+          makeId: newId,
+        });
+        updateData(() => next);
+      } catch (err) { setNotice(formatStockError(err)); return; }
+      setModal(null);
+      setNotice('Ralat shift disimpan.');
+      return;
     } else if (type === 'settings') {
       const minStock = Number(form.minStock); const expiryDays = Number(form.expiryDays);
       if (!Number.isInteger(minStock) || minStock < 1 || minStock > 10000 || !Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 30) return setNotice(t.invalidQty);
@@ -400,13 +419,22 @@ export default function Dashboard() {
     updateData((previous) => ({ ...previous, requests: previous.requests.map((item) => item.id === request.id ? { ...item, status: 'Ditolak' } : item) }));
     setNotice(t.rejected);
   }
+  function formatStockError(err) {
+    if (err?.productId) {
+      const name = productName(err.productId);
+      const stock = err.stock ?? realStockFor(dataRef.current.rows, err.productId, selectedStore);
+      return `Jumlah terjual melebihi stok gerai (${name}: stok ${number.format(stock)}, minta ${number.format(err.requested ?? 0)}).`;
+    }
+    return err?.message || t.invalidQty;
+  }
   function shipRequest(request) {
     const lines = normalizeRequest(request).lines;
     const pool = dataRef.current.production.filter((b) => b.status === 'Siap kirim' && b.available > 0 && daysUntil(b.expires) >= 0 && (!b.requestId || b.requestId === request.id));
     const grouped = allocateLinesFEFO(pool, lines);
     if (!grouped) { setNotice(t.insufficientProduction); return; }
+    const createdByBatch = new Map(pool.map((b) => [b.id, b.created || request.created || todayISO()]));
     const usedIds = new Set(grouped.flatMap((g) => g.allocations.map((a) => a.batchId)));
-    const flat = grouped.flatMap((g) => g.allocations.map((a) => ({ ...a, productId: g.productId })));
+    const flat = grouped.flatMap((g) => g.allocations.map((a) => ({ ...a, productId: g.productId, created: a.created || createdByBatch.get(a.batchId) || request.created || todayISO() })));
     updateData((previous) => ({
       ...previous,
       production: previous.production.map((batch) => {
@@ -423,15 +451,14 @@ export default function Dashboard() {
     return normalizeRequest(request).lines.map((line) => ({ ...line, name: productName(line.productId) }));
   }
   function shippedOf(request) {
-    const req = normalizeRequest(request);
-    if (req.allocations && req.allocations.length) {
-      return req.lines.map((l) => ({ productId: l.productId, qty: l.qty }));
-    }
-    return req.lines.map((l) => ({ productId: l.productId, qty: l.qty }));
+    // List kiriman lengkap: qty + batch + expires + created, scoped via storeId request.
+    return shipmentLines(request, dataRef.current.production).map((l) => ({
+      ...l, name: productName(l.productId),
+    }));
   }
 
   function inventory(compact = false) {
-    if (!scopedRows.length) return <EmptyState title="Belum ada batch stok" detail="Stok gerai akan muncul setelah kiriman diterima dan dicatat." />;
+    if (!scopedRows.length) return <section aria-label="Stok per gerai"><Heading title={t.nav.stok} detail={isAdmin ? 'Pantau semua stok semua gerai — diurutkan berdasarkan kedaluwarsa terdekat.' : 'Stok gerai Anda — diurutkan berdasarkan kedaluwarsa terdekat.'} /><EmptyState title="Belum ada batch stok" detail={isAdmin ? 'Belum ada kiriman yang diterima gerai mana pun. Stok muncul setelah gerai klik Terima.' : 'Stok masih nol. Buat pesanan di Pesan Stok, tunggu status Dikirim, lalu klik Terima.'} /></section>;
     const shown = compact ? filteredRows.slice(0, 5) : filteredRows;
     return <section aria-label="Stok per gerai"><Heading title={t.nav.stok} detail="Diurutkan berdasarkan kedaluwarsa terdekat." action={<div className="d-flex gap-2 flex-wrap">{compact && <button className="btn btn-outline-dark" onClick={() => navigate('stok')}>Lihat semua</button>}{!compact && isAdmin && <button className="btn hb-btn-gold" onClick={() => openModal('batch', { storeId: stores[0]?.id || '', productId: products[0]?.id || '', batch: '', quantity: '', expires: '' })}>Catat batch</button>}</div>} />
       <div className="hb-filters"><label className="visually-hidden" htmlFor={`hb-search-${compact}`}>Cari</label><input id={`hb-search-${compact}`} className="form-control" type="search" placeholder={t.searchStock} value={filters.search} onChange={(event) => setFilters((old) => ({ ...old, search: event.target.value }))} />{isAdmin && <select className="form-select" aria-label="Filter gerai" value={filters.store} onChange={(event) => setFilters((old) => ({ ...old, store: event.target.value }))}><option value="semua">Semua gerai</option>{stores.filter((s) => s.status === 'Disetujui').map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select>}<select className="form-select" aria-label="Filter produk" value={filters.product} onChange={(event) => setFilters((old) => ({ ...old, product: event.target.value }))}><option value="semua">Semua produk</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></div>
@@ -448,12 +475,12 @@ export default function Dashboard() {
           <ul className="hb-simple-list">{lines.map((line) => <li key={line.productId}><strong>{line.name}</strong><span className="hb-muted">{number.format(line.qty)} × {money(line.price)}</span></li>)}</ul>
           {request.total ? <p className="mb-2"><strong>Total: {money(request.total)}</strong></p> : <p className="mb-2">{number.format(request.quantity)} botol</p>}
           {request.note && <p className="hb-muted">{request.note}</p>}
-          {request.allocations?.length > 0 && <p className="hb-muted">Batch: {request.allocations.map((item) => `${item.batch} (${item.quantity})`).join(', ')}</p>}
+          {request.allocations?.length > 0 && <ul className="hb-simple-list" aria-label="Barang dikirim">{shippedOf(request).map((s) => <li key={s.productId}><strong>{s.name}</strong><span className="hb-muted">{number.format(s.qty)} botol · {s.batch}{s.expires ? ` · Exp ${dateLabel(s.expires)}` : ''}{s.created ? ` · Dibuat ${dateLabel(s.created)}` : ''} · Untuk {storeName(request.storeId)}</span></li>)}</ul>}
           {request.received?.length > 0 && <p className="hb-muted">{t.received}: {request.received.map((item) => `${productName(item.productId)}: ${t.readyToSell} ${item.good}, ${t.retur} ${item.retur}`).join(' · ')}</p>}
           <div className="d-flex flex-wrap gap-2">
             {isAdmin && request.status === 'Diajukan' && <><button className="btn hb-btn-gold" onClick={() => openModal('approve', { requestId: request.id, expires: plus30() })}>{t.approveProduce}</button><button className="btn btn-outline-dark" onClick={() => rejectRequest(request)}>{t.reject}</button></>}
             {isAdmin && request.status === 'Produksi' && <span className="hb-muted">{t.inProduction}</span>}
-            {!isAdmin && request.status === 'Dikirim' && <button className="btn hb-btn-gold" onClick={() => openModal('receive', { requestId: request.id, lines: shippedOf(request).map((l) => ({ ...l, name: productName(l.productId), good: l.qty, retur: 0 })) })}>{t.receive}</button>}
+            {!isAdmin && request.status === 'Dikirim' && <button className="btn hb-btn-gold" onClick={() => openModal('receive', { requestId: request.id, lines: shippedOf(request).map((l) => ({ ...l, good: l.qty, retur: 0 })) })}>{t.receive}</button>}
             {['Diterima', 'Ditolak'].includes(request.status) && <span className="hb-muted">Alur selesai</span>}
           </div>
         </article>;
@@ -565,7 +592,7 @@ export default function Dashboard() {
     const myShifts = scopedShifts;
     return <section><div className="hb-pos-grid">
       <div className="hb-panel"><div className="hb-section-heading"><h2 className="h5 mb-0">{t.nav.shift}</h2><span className="hb-muted">{myStore?.name}</span></div>
-        {posBaseCatalog.length ? <div className="table-responsive"><table className="table table-hover align-middle"><thead><tr><th scope="col">Produk</th><th scope="col">Stok</th><th scope="col">Harga</th><th scope="col">Terjual</th><th scope="col">Subtotal</th></tr></thead><tbody>{posBaseCatalog.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.stock ?? '—'}</td><td>{item.price ? money(item.price) : '—'}</td><td><input className="form-control" style={{ maxWidth: 110 }} type="number" min="0" max={item.stock ?? 10000} value={shiftQty[item.id] ?? ''} onChange={(event) => setShiftQty((old) => ({ ...old, [item.id]: event.target.value }))} aria-label={`Terjual ${item.name}`} /></td><td>{money((item.price || 0) * (Number(shiftQty[item.id]) || 0))}</td></tr>)}</tbody></table></div> : <EmptyState title="Belum ada produk" detail="Katalog produk belum tersedia." />}
+        {posBaseCatalog.length ? <div className="table-responsive"><table className="table table-hover align-middle"><thead><tr><th scope="col">Produk</th><th scope="col">Stok</th><th scope="col">Harga</th><th scope="col">Terjual</th><th scope="col">Subtotal</th></tr></thead><tbody>{posBaseCatalog.map((item) => <tr key={item.id}><td><strong>{item.name}</strong>{item.sample && <span className="d-block hb-muted">Belum ada stok</span>}</td><td>{number.format(item.stock ?? 0)} botol</td><td>{item.price ? money(item.price) : '—'}</td><td><input className="form-control" style={{ maxWidth: 110 }} type="number" min="0" max={item.stock ?? 0} disabled={(item.stock ?? 0) <= 0} placeholder={(item.stock ?? 0) <= 0 ? '0' : ''} value={shiftQty[item.id] ?? ''} onChange={(event) => setShiftQty((old) => ({ ...old, [item.id]: event.target.value }))} aria-label={`Terjual ${item.name}`} /></td><td>{money((item.price || 0) * (Number(shiftQty[item.id]) || 0))}</td></tr>)}</tbody></table></div> : <EmptyState title="Belum ada produk" detail="Katalog produk belum tersedia." />}
       </div>
       <aside className="hb-panel"><div className="hb-section-heading"><h2 className="h5 mb-0">{t.difference}</h2></div>
         <dl className="hb-totals">
@@ -581,12 +608,12 @@ export default function Dashboard() {
             updateData(() => next);
             setShiftQty({}); setShiftCash(''); setShiftNote('');
             setNotice(t.shiftSaved);
-          } catch (err) { setNotice(err.message); }
+          } catch (err) { setNotice(formatStockError(err)); }
         }}>{t.submitShift}</button>
       </aside>
     </div>
-      <div className="hb-panel mt-3"><Heading title={t.shiftHistory} />
-        {myShifts.length ? <div className="table-responsive"><table className="table table-hover align-middle"><thead><tr><th scope="col">Tanggal</th><th scope="col">Rincian</th><th scope="col">Ekspektasi</th><th scope="col">Aktual</th><th scope="col">Selisih</th></tr></thead><tbody>{[...myShifts].sort((a, b) => b.date.localeCompare(a.date)).map((s) => <tr key={s.id}><td>{dateLabel(s.date)}</td><td>{s.lines.map((l) => `${productName(l.productId)} ×${l.qty}`).join(', ')}{s.note ? ` · ${s.note}` : ''}</td><td>{money(s.expectedTotal)}</td><td>{money(s.actualTotal)}</td><td>{money(s.difference)}</td></tr>)}</tbody></table></div> : <p className="hb-muted mb-0">—</p>}
+      <div className="hb-panel mt-3"><Heading title={t.shiftHistory} detail="Salah input? Klik Edit untuk meralat — stok otomatis dikoreksi." />
+        {myShifts.length ? <div className="table-responsive"><table className="table table-hover align-middle"><thead><tr><th scope="col">Tanggal</th><th scope="col">Rincian</th><th scope="col">Ekspektasi</th><th scope="col">Aktual</th><th scope="col">Selisih</th><th scope="col">Aksi</th></tr></thead><tbody>{[...myShifts].sort((a, b) => b.date.localeCompare(a.date)).map((s) => <tr key={s.id}><td>{dateLabel(s.date)}{s.editCount > 0 && <span className="d-block hb-muted">Ralat ×{s.editCount}</span>}</td><td>{s.lines.map((l) => `${productName(l.productId)} ×${l.qty}`).join(', ')}{s.note ? ` · ${s.note}` : ''}</td><td>{money(s.expectedTotal)}</td><td>{money(s.actualTotal)}</td><td>{money(s.difference)}</td><td><button className="btn btn-outline-dark hb-btn-sm" onClick={() => openModal('shiftEdit', { reportId: s.id, lines: s.lines.map((l) => ({ productId: l.productId, name: productName(l.productId), price: l.price, qty: l.qty })), actualTotal: s.actualTotal, note: s.note || '' })}>Edit</button></td></tr>)}</tbody></table></div> : <p className="hb-muted mb-0">—</p>}
       </div>
     </section>;
   }
@@ -622,13 +649,29 @@ export default function Dashboard() {
     }
     if (modal.type === 'receive') {
       return <form id="hb-modal-form" onSubmit={submit}><div className="modal-body hb-form">
+        <p className="hb-muted">Stok bertambah setelah Terima disimpan. Pastikan siap jual + retur = terkirim.</p>
         {(form.lines || []).map((line) => <div key={line.productId} className="hb-receive-row">
-          <strong>{line.name}</strong><span className="hb-muted d-block">{t.shipped}: {line.qty}</span>
+          <strong>{line.name}</strong><span className="hb-muted d-block">{t.shipped}: {number.format(line.qty)} botol · {line.batch}{line.expires ? ` · Exp ${dateLabel(line.expires)}` : ''}{line.created ? ` · Dibuat ${dateLabel(line.created)}` : ''}</span>
           <div className="hb-receive-inputs">
             <div><label htmlFor={`hb-good-${line.productId}`}>{t.readyToSell}</label><input id={`hb-good-${line.productId}`} className="form-control" type="number" min="0" max={line.qty} required value={line.good} onChange={(event) => setForm((old) => ({ ...old, lines: old.lines.map((l) => l.productId === line.productId ? { ...l, good: event.target.value } : l) }))} /></div>
             <div><label htmlFor={`hb-retur-${line.productId}`}>{t.retur}</label><input id={`hb-retur-${line.productId}`} className="form-control" type="number" min="0" max={line.qty} required value={line.retur} onChange={(event) => setForm((old) => ({ ...old, lines: old.lines.map((l) => l.productId === line.productId ? { ...l, retur: event.target.value } : l) }))} /></div>
           </div>
         </div>)}
+      </div></form>;
+    }
+    if (modal.type === 'shiftEdit') {
+      const report = (data.shiftReports || []).find((s) => s.id === form.reportId);
+      const maxFor = (productId) => realStockFor(data.rows, productId, selectedStore) + ((report?.lines || []).find((l) => l.productId === productId)?.qty || 0);
+      return <form id="hb-modal-form" onSubmit={submit}><div className="modal-body hb-form">
+        <p className="hb-muted">Ralat laporan {report ? dateLabel(report.date) : ''} — stok otomatis dikoreksi dan tercatat sebagai koreksi.</p>
+        {(form.lines || []).map((line) => <div key={line.productId} className="hb-receive-row">
+          <strong>{line.name || productName(line.productId)}</strong><span className="hb-muted d-block">Stok tersedia (termasuk yang lama): {number.format(maxFor(line.productId))} botol</span>
+          <div><label htmlFor={`hb-shift-edit-${line.productId}`}>Terjual</label><input id={`hb-shift-edit-${line.productId}`} className="form-control" type="number" min="1" max={maxFor(line.productId)} required value={line.qty} onChange={(event) => setForm((old) => ({ ...old, lines: old.lines.map((l) => l.productId === line.productId ? { ...l, qty: event.target.value } : l) }))} /></div>
+        </div>)}
+        <label htmlFor="hb-shift-edit-cash">{t.actualCash}</label>
+        <input id="hb-shift-edit-cash" className="form-control" type="number" min="0" step="500" value={form.actualTotal ?? ''} onChange={(event) => setForm((old) => ({ ...old, actualTotal: event.target.value }))} />
+        <label htmlFor="hb-shift-edit-note">Catatan</label>
+        <input id="hb-shift-edit-note" className="form-control" maxLength={200} value={form.note || ''} onChange={(event) => setForm((old) => ({ ...old, note: event.target.value }))} />
       </div></form>;
     }
     if (modal.type === 'detail') {
@@ -645,8 +688,8 @@ export default function Dashboard() {
     </div></form>;
   }
 
-  const modalTitle = { notifications: 'Peringatan', detail: 'Detail batch', product: 'Tambah produk', productEdit: t.editProduct, batch: 'Catat batch stok', production: 'Catat batch produksi', settings: 'Atur batas peringatan', struk: t.orderReceipt, approve: t.approveProduce, receive: t.receive };
-  const modalSubmitLabel = { approve: t.approveProduce, receive: t.receive };
+  const modalTitle = { notifications: 'Peringatan', detail: 'Detail batch', product: 'Tambah produk', productEdit: t.editProduct, batch: 'Catat batch stok', production: 'Catat batch produksi', settings: 'Atur batas peringatan', struk: t.orderReceipt, approve: t.approveProduce, receive: t.receive, shiftEdit: 'Ralat laporan shift' };
+  const modalSubmitLabel = { approve: t.approveProduce, receive: t.receive, shiftEdit: 'Simpan ralat' };
   const visibleNav = NAV.filter((item) => (isAdmin ? !item.staffOnly : !item.admin));
   const activeLabel = t.nav[visibleNav.find((item) => item.id === page)?.labelKey] || '';
   const isOrderPage = page === 'order';
