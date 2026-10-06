@@ -124,12 +124,12 @@ class DatabaseSeeder extends Seeder
                     'descEn' => $seed['descEn'],
                 ])->save();
             } else {
-                \App\Models\CatalogProduct::create(array_merge(['_id' => (string) \Illuminate\Support\Str::uuid()], $seed));
+                \App\Models\CatalogProduct::create($seed);
             }
         }
 
-        if (! \App\Models\DashboardSetting::find('global')) {
-            \App\Models\DashboardSetting::create(['_id' => 'global', 'minStock' => null, 'expiryDays' => 7]);
+        if (! \App\Models\DashboardSetting::first()) {
+            \App\Models\DashboardSetting::create(['minStock' => null, 'expiryDays' => 7]);
         }
     }
 }

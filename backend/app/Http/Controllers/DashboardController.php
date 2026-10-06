@@ -51,9 +51,7 @@ class DashboardController extends Controller
             return response()->json(['message' => 'Nama gerai sudah terdaftar.'], 422);
         }
 
-        $storeId = (string) Str::uuid();
         $store = Store::create([
-            '_id' => $storeId,
             'name' => trim($data['storeName']),
             'location' => trim($data['location']),
             'status' => 'Diajukan',
@@ -64,7 +62,7 @@ class DashboardController extends Controller
             'name' => trim($data['name']),
             'email' => $email,
             'password' => $data['password'],
-            'storeId' => $storeId,
+            'storeId' => (string) $store->id,
             'role' => 'staff',
             'api_token' => Str::random(60),
         ]);
@@ -126,7 +124,7 @@ class DashboardController extends Controller
             return response()->json(['message' => 'Produk tersebut sudah dicatat.'], 422);
         }
 
-        $product = CatalogProduct::create(array_merge(['_id' => (string) Str::uuid()], $data, ['name' => $name]));
+        $product = CatalogProduct::create(array_merge($data, ['name' => $name]));
 
         return response()->json(['products' => CatalogProduct::orderBy('name')->get()], 201);
     }
@@ -241,7 +239,6 @@ class DashboardController extends Controller
         }
 
         StockRow::create([
-            '_id' => (string) Str::uuid(),
             'batch' => $data['batch'],
             'storeId' => $data['storeId'],
             'productId' => $data['productId'],
@@ -295,7 +292,6 @@ class DashboardController extends Controller
         ], $data['lines']);
 
         $order = RestockRequest::create([
-            '_id' => (string) Str::uuid(),
             'storeId' => $storeId,
             'productId' => $lines[0]['productId'],
             'quantity' => array_sum(array_column($lines, 'qty')),
@@ -344,8 +340,7 @@ class DashboardController extends Controller
         $date = $this->todayISO();
         foreach ($lines as $i => $line) {
             ProductionBatch::create([
-                '_id' => (string) Str::uuid(),
-                'batch' => 'B-'.strtoupper(substr($req->id, 0, 6)).'-'.($i + 1),
+                    'batch' => 'B-'.strtoupper(substr($req->id, 0, 6)).'-'.($i + 1),
                 'requestId' => $req->id,
                 'storeId' => $req->storeId,
                 'productId' => $line['productId'],
@@ -467,8 +462,7 @@ class DashboardController extends Controller
             }
             if ($retur > 0) {
                 Activity::create([
-                    '_id' => (string) Str::uuid(),
-                    'rowId' => 'pos',
+                            'rowId' => 'pos',
                     'storeId' => $req->storeId,
                     'productId' => $line['productId'],
                     'batch' => 'B-'.strtoupper(substr($req->id, 0, 6)),
@@ -513,7 +507,6 @@ class DashboardController extends Controller
         }
 
         ProductionBatch::create([
-            '_id' => (string) Str::uuid(),
             'batch' => $data['batch'],
             'requestId' => null,
             'storeId' => null,
@@ -566,14 +559,8 @@ class DashboardController extends Controller
 
         $expected = $this->expectedTotal($lines);
         $actual = (int) ($data['actualTotal'] ?? 0);
-        $reportId = (string) Str::uuid();
-
-        foreach ($lines as $line) {
-            $this->deductStock($storeId, $line, $reportId, $data['note'] ?? '', $this->todayISO());
-        }
 
         $report = ShiftReport::create([
-            '_id' => $reportId,
             'storeId' => $storeId,
             'date' => $this->todayISO(),
             'lines' => $this->reportLines($lines),
@@ -584,6 +571,10 @@ class DashboardController extends Controller
             'editedAt' => null,
             'editCount' => 0,
         ]);
+
+        foreach ($lines as $line) {
+            $this->deductStock($storeId, $line, (string) $report->id, $data['note'] ?? '', $this->todayISO());
+        }
 
         return response()->json([
             'shiftReports' => $this->scopedShifts($request),
@@ -633,7 +624,6 @@ class DashboardController extends Controller
 
         $summary = implode(', ', array_map(fn ($l) => $l['productId'].' '.($oldByProduct[$l['productId']] ?? 0).'→'.$l['qty'], $lines));
         Activity::create([
-            '_id' => (string) Str::uuid(),
             'reportId' => $report->id,
             'rowId' => 'pos',
             'storeId' => $storeId,
@@ -831,7 +821,6 @@ class DashboardController extends Controller
             return;
         }
         StockRow::create([
-            '_id' => (string) Str::uuid(),
             'batch' => $batchName,
             'storeId' => $storeId,
             'productId' => $productId,
@@ -880,8 +869,7 @@ class DashboardController extends Controller
             $remaining -= $taken;
 
             Activity::create([
-                '_id' => (string) Str::uuid(),
-                'reportId' => $reportId,
+                    'reportId' => $reportId,
                 'rowId' => $row->id,
                 'storeId' => $storeId,
                 'productId' => $line['productId'],
@@ -1002,8 +990,8 @@ class DashboardController extends Controller
             ]);
         }
         $this->seedCentralCatalog();
-        if (! DashboardSetting::find('global')) {
-            DashboardSetting::create(['_id' => 'global', 'minStock' => null, 'expiryDays' => 7]);
+        if (! DashboardSetting::first()) {
+            DashboardSetting::create(['minStock' => null, 'expiryDays' => 7]);
         }
     }
 
@@ -1022,25 +1010,25 @@ class DashboardController extends Controller
                     'descEn' => $seed['descEn'],
                 ])->save();
             } else {
-                CatalogProduct::create(array_merge(['_id' => (string) Str::uuid()], $seed));
+                CatalogProduct::create($seed);
             }
         }
     }
 
     private function getSettings(): array
     {
-        $s = DashboardSetting::find('global');
+        $s = DashboardSetting::first();
 
         return $s ? ['minStock' => $s->minStock, 'expiryDays' => $s->expiryDays] : ['minStock' => null, 'expiryDays' => 7];
     }
 
     private function saveSettings(array $data): void
     {
-        $s = DashboardSetting::find('global');
+        $s = DashboardSetting::first();
         if ($s) {
             $s->fill($data)->save();
         } else {
-            DashboardSetting::create(array_merge(['_id' => 'global'], $data));
+            DashboardSetting::create($data);
         }
     }
 }
