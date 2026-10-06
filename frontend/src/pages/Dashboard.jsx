@@ -99,6 +99,7 @@ export default function Dashboard() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [filters, setFilters] = useState(emptyFilters);
   const [range, setRange] = useState(7);
+  const [reportMonth, setReportMonth] = useState(() => todayISO().slice(0, 7));
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [notice, setNotice] = useState('');
@@ -455,11 +456,57 @@ export default function Dashboard() {
     </section>;
   }
 
+  // ponytail: laporan dicetak lewat jendela baru + window.print, tanpa library PDF.
+  function printMonthlyReport() {
+    const month = reportMonth;
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`));
+    const reportStores = stores.filter((s) => s.status === 'Disetujui');
+    const rows = reportStores.map((store) => {
+      const acts = scopedActivities.filter((a) => a.storeId === store.id && a.date.startsWith(month));
+      const shifts = scopedShifts.filter((s) => s.storeId === store.id && s.date.startsWith(month));
+      const soldQty = sum(acts.filter((a) => a.kind === 'terjual'), 'quantity');
+      const returQty = sum(acts.filter((a) => a.kind === 'retur'), 'quantity');
+      const exp = shifts.reduce((s, r) => s + (r.expectedTotal || 0), 0);
+      const act = shifts.reduce((s, r) => s + (r.actualTotal || 0), 0);
+      return { name: store.name, location: store.location, soldQty, returQty, exp, act };
+    });
+    const totals = rows.reduce((t, r) => ({ sold: t.sold + r.soldQty, retur: t.retur + r.returQty, exp: t.exp + r.exp, act: t.act + r.act }), { sold: 0, retur: 0, exp: 0, act: 0 });
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const row = (r) => `<tr><td>${esc(r.name)}${r.location ? `<br><small>${esc(r.location)}</small>` : ''}</td><td class="num">${number.format(r.soldQty)}</td><td class="num">${number.format(r.returQty)}</td><td class="num">${money(r.exp)}</td><td class="num">${money(r.act)}</td><td class="num">${money(r.act - r.exp)}</td></tr>`;
+
+    const w = window.open('', '_blank', 'width=900,height=650');
+    if (!w) { setNotice('Izinkan pop-up untuk mencetak laporan.'); return; }
+    w.document.write(`<!doctype html><html lang="${dlang}"><head><meta charset="utf-8"><title>${esc(t.monthlySalesReport)} ${esc(monthLabel)}</title><style>
+      body { font-family: system-ui, -apple-system, sans-serif; color: #111; margin: 36px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .meta { color: #555; font-size: 13px; margin: 0 0 24px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; vertical-align: top; }
+      th { background: #f3f3f3; }
+      th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+      tfoot td { font-weight: 600; background: #fafafa; }
+      small { color: #666; }
+      @media print { body { margin: 12px; } }
+    </style></head><body>
+      <h1>HelcoBali — ${esc(t.monthlySalesReport)}</h1>
+      <p class="meta">${esc(monthLabel)}</p>
+      <table>
+        <thead><tr><th>${esc(t.helloStore)}</th><th class="num">${esc(t.sold)}</th><th class="num">${esc(t.retur)}</th><th class="num">${esc(t.expectedCash)}</th><th class="num">${esc(t.actualCash.replace(' (Rp)', ''))}</th><th class="num">${esc(t.difference)}</th></tr></thead>
+        <tbody>${rows.map(row).join('')}</tbody>
+        <tfoot><tr><td>${esc(t.total)}</td><td class="num">${number.format(totals.sold)}</td><td class="num">${number.format(totals.retur)}</td><td class="num">${money(totals.exp)}</td><td class="num">${money(totals.act)}</td><td class="num">${money(totals.act - totals.exp)}</td></tr></tfoot>
+      </table>
+      <script>window.onload=function(){window.print()}</script>
+    </body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
   function reports() {
     const summaryStores = isAdmin
       ? (filters.store === 'semua' ? stores.filter((s) => s.status === 'Disetujui') : stores.filter((s) => s.id === filters.store))
       : scopedStores;
-    return <section><Heading title={t.nav.penjualan} detail="Berasal dari tutup shift (terjual) dan penerimaan (retur). Read-only." action={isAdmin && <select className="form-select" aria-label="Filter gerai" style={{ width: 'auto' }} value={filters.store} onChange={(event) => setFilters((old) => ({ ...old, store: event.target.value }))}><option value="semua">Semua gerai</option>{stores.filter((s) => s.status === 'Disetujui').map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select>} />
+    return <section><Heading title={t.nav.penjualan} detail="Berasal dari tutup shift (terjual) dan penerimaan (retur). Read-only." action={isAdmin && <div className="d-flex gap-2 align-items-center flex-wrap"><select className="form-select" aria-label="Filter gerai" style={{ width: 'auto' }} value={filters.store} onChange={(event) => setFilters((old) => ({ ...old, store: event.target.value }))}><option value="semua">Semua gerai</option>{stores.filter((s) => s.status === 'Disetujui').map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select><input type="month" className="form-control" style={{ width: 'auto' }} value={reportMonth} onChange={(event) => setReportMonth(event.target.value)} aria-label={t.monthlySalesReport} /><button className="btn btn-outline-dark" type="button" onClick={printMonthlyReport}>{t.printMonthly}</button></div>} />
       <div className="hb-request-grid">{summaryStores.map((store) => {
         const acts = scopedActivities.filter((a) => a.storeId === store.id);
         const shifts = scopedShifts.filter((s) => s.storeId === store.id);
