@@ -4,14 +4,13 @@ import Chart from 'chart.js/auto';
 import bootstrapStylesheet from 'bootstrap/dist/css/bootstrap.min.css?url';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import {
-  STORAGE_KEY, SESSION_KEY, DASH_LANG_KEY, allocateLinesFEFO, applyReceipt, applyShiftReport,
-  approveRequestToProduction, approveStore, buildPosRequest, calcPosChange, calcPosTotals,
-  calcShiftReport, daysUntil, expectedStock, findUserByEmail, groupBatchesByRequest,
+  DASH_LANG_KEY, calcPosChange, calcPosTotals,
+  calcShiftReport, daysUntil, expectedStock, groupBatchesByRequest,
   newDashboardData, normalizeRequest, normalizeProduct, posCatalog, POS_PAY_METHODS,
-  POS_SAMPLE_PRODUCTS, PRODUCT_IMAGE_CHOICES, productInUse, realStockFor, rejectStore,
-  restoreDashboardData, reviseShiftReport, seedCentralCatalog, shipmentLines, statusesFor,
+  POS_SAMPLE_PRODUCTS, PRODUCT_IMAGE_CHOICES, realStockFor, shipmentLines, statusesFor,
   sum, todayISO,
 } from './dashboardModel';
+import { api, clearSession, getSession, loadDashboard } from './dashboardApi';
 import { dashboardLocales } from '../locales';
 import './Dashboard.css';
 
@@ -89,15 +88,12 @@ function TrendChart({ activities, range, setRange, emptyTitle, emptyDetail }) {
 export default function Dashboard() {
   const [phase, setPhase] = useState('loading');
   const [data, setData] = useState(newDashboardData);
-  const dataRef = useRef(data);
+  const [currentUser, setCurrentUser] = useState(() => getSession()?.user ?? null);
   const [storageError, setStorageError] = useState('');
   const [cssReady, setCssReady] = useState(false);
   const [cssError, setCssError] = useState(false);
   const [dlang, setDlang] = useState(() => {
     try { return window.localStorage.getItem(DASH_LANG_KEY) === 'en' ? 'en' : 'id'; } catch { return 'id'; }
-  });
-  const [sessionEmail, setSessionEmail] = useState(() => {
-    try { return JSON.parse(window.localStorage.getItem(SESSION_KEY))?.email || ''; } catch { return ''; }
   });
   const [page, setPage] = useState('ringkasan');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -130,21 +126,18 @@ export default function Dashboard() {
   const dateLabel = (value) => dateFormat.format(new Date(`${value}T12:00:00`));
   const money = (value) => currency.format(value || 0).replace(',00', '').replace('.00', '');
   const pdesc = (item) => (dlang === 'en' ? (item.descEn || item.descId || '') : (item.descId || item.descEn || ''));
-  const newId = () => crypto.randomUUID();
 
-  const readLocalData = useCallback(() => {
+  const loadData = useCallback(async () => {
+    if (!getSession()?.token) { setCurrentUser(null); setPhase('ready'); return; }
     try {
-      const restored = restoreDashboardData(window.localStorage.getItem(STORAGE_KEY));
-      const seeded = seedCentralCatalog(restored, () => crypto.randomUUID());
-      if (seeded !== restored) {
-        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); } catch { /* abaikan */ }
-      }
-      dataRef.current = seeded;
-      setData(seeded);
+      const { user, data: fresh } = await loadDashboard();
+      setCurrentUser(user);
+      setData(fresh);
       setStorageError('');
       setPhase('ready');
-    } catch {
-      setPhase('error');
+    } catch (err) {
+      if (err.status === 401) { clearSession(); setCurrentUser(null); setPhase('ready'); }
+      else setPhase('error');
     }
   }, []);
 
@@ -160,21 +153,14 @@ export default function Dashboard() {
     return () => { stylesheet.remove(); document.title = oldTitle; };
   }, []);
   useEffect(() => {
-    const timer = window.setTimeout(readLocalData, 0);
-    return () => window.clearTimeout(timer);
-  }, [readLocalData]);
+    loadData();
+  }, [loadData]);
 
-  function updateData(change) {
-    const next = change(dataRef.current);
-    dataRef.current = next;
-    setData(next);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      setStorageError('');
-    } catch {
-      setStorageError('Penyimpanan browser gagal. Perubahan sesi ini belum tersimpan.');
-    }
-  }
+  const mutate = async (promise) => {
+    const res = await promise;
+    setData((prev) => ({ ...prev, ...res }));
+    return res;
+  };
 
   useEffect(() => {
     if (!modal) return undefined;
@@ -211,7 +197,6 @@ export default function Dashboard() {
     return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('resize', onResize); opener?.focus(); };
   }, [mobileOpen]);
 
-  const currentUser = sessionEmail ? findUserByEmail(data, sessionEmail) : null;
   const isAdmin = currentUser?.role === 'admin';
   const myStore = !currentUser || isAdmin ? null : data.stores.find((s) => s.id === currentUser.storeId) || null;
   const storeApproved = isAdmin || (myStore && myStore.status === 'Disetujui');
@@ -220,9 +205,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (phase !== 'ready' || !currentUser || isAdmin || storeApproved) return undefined;
-    const timer = window.setInterval(readLocalData, 4000);
+    const timer = window.setInterval(loadData, 4000);
     return () => window.clearInterval(timer);
-  }, [phase, currentUser, isAdmin, storeApproved, readLocalData]);
+  }, [phase, currentUser, isAdmin, storeApproved, loadData]);
 
   function toggleLang() {
     setDlang((prev) => {
@@ -232,8 +217,8 @@ export default function Dashboard() {
     });
   }
   function logout() {
-    try { window.localStorage.removeItem(SESSION_KEY); } catch { /* abaikan */ }
-    setSessionEmail('');
+    clearSession();
+    setCurrentUser(null);
     setPage('ringkasan');
   }
 
@@ -304,27 +289,31 @@ export default function Dashboard() {
     setCart([]); setCustomer(''); setDiscountRp(''); setReceived(''); setPayMethod('Tunai');
     setNotice(t.newReady);
   }
-  function checkoutPos() {
+  async function checkoutPos() {
     if (!cartDetailed.length) { setNotice(t.orderEmpty); return; }
     if (posTotals.total <= 0) { setNotice(t.invalidQty); return; }
     if (payMethod === 'Tunai' && (received === '' || posChange < 0)) { setNotice(t.moneyShort); return; }
-    const saleDate = todayISO();
-    const receiptId = `ORD-${saleDate.replaceAll('-', '')}-${String(data.requests.length + 1).padStart(3, '0')}`;
-    let request;
     try {
-      request = buildPosRequest({ storeId: selectedStore, cartDetailed, customer: customer.trim(), method: payMethod, totals: posTotals, receiptId, date: saleDate, makeId: newId });
-    } catch (err) { setNotice(err.message); return; }
-    const receipt = {
-      id: request.id, receiptId, date: saleDate, store: storeName(selectedStore),
-      customer: request.customer, method: payMethod, lines: cartDetailed.map((line) => ({ ...line })),
-      ...posTotals, received: payMethod === 'Tunai' ? Number(received) || 0 : posTotals.total,
-      change: payMethod === 'Tunai' ? posChange : 0,
-    };
-    updateData((previous) => ({ ...previous, requests: [request, ...previous.requests] }));
-    setLastReceipt(receipt);
-    setCart([]); setDiscountRp(''); setReceived('');
-    openModal('struk', { receipt });
-    setNotice(`${t.orderRecorded} Total ${money(receipt.total)}.`);
+      const res = await mutate(api.createRequest({
+        customer: customer.trim(),
+        method: payMethod,
+        discount: Number(discountRp) || 0,
+        tax: posTotals.tax,
+        total: posTotals.total,
+        lines: cartDetailed.map((line) => ({ productId: line.productId, qty: line.qty, price: line.price })),
+      }));
+      const request = res.requests[0];
+      const receipt = {
+        id: request.id, receiptId: request.receiptId, date: request.created, store: storeName(selectedStore),
+        customer: request.customer, method: payMethod, lines: cartDetailed.map((line) => ({ ...line })),
+        ...posTotals, received: payMethod === 'Tunai' ? Number(received) || 0 : posTotals.total,
+        change: payMethod === 'Tunai' ? posChange : 0,
+      };
+      setLastReceipt(receipt);
+      setCart([]); setDiscountRp(''); setReceived('');
+      openModal('struk', { receipt });
+      setNotice(`${t.orderRecorded} Total ${money(receipt.total)}.`);
+    } catch (err) { setNotice(err.message); }
   }
 
   function navigate(target, status) {
@@ -339,112 +328,74 @@ export default function Dashboard() {
     setForm(values);
     setModal({ type });
   }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
     const { type } = modal;
-    if (type === 'product' || type === 'productEdit') {
-      const name = form.name?.trim();
-      if (!name) return;
-      const clash = products.some((product) => product.id !== form.id && product.name.toLocaleLowerCase('id-ID') === name.toLocaleLowerCase('id-ID'));
-      if (clash) return setNotice('Produk tersebut sudah dicatat.');
-      if (!Number.isInteger(Number(form.price)) || Number(form.price) < 1) return setNotice(t.invalidQty);
-      const record = {
-        name, price: Number(form.price),
-        image: form.image?.trim() || null,
-        notes: form.notes?.trim() || '',
-        roast: form.roast?.trim() || '',
-        origin: form.origin?.trim() || '',
-        descId: form.descId?.trim() || '',
-        descEn: form.descEn?.trim() || '',
-      };
-      if (type === 'product') {
-        updateData((previous) => ({ ...previous, products: [...previous.products.map(normalizeProduct), { ...record, id: newId() }] }));
-      } else {
-        updateData((previous) => ({ ...previous, products: previous.products.map((product) => product.id === form.id ? { ...normalizeProduct(product), ...record } : product) }));
-      }
-    } else if (type === 'batch' || type === 'production') {
-      const quantity = Number(form.quantity);
-      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000) { setNotice(t.invalidQty); return; }
-      const batch = form.batch?.trim();
-      if (!batch || !form.expires || daysUntil(form.expires) < 0) return setNotice(t.invalidQty);
-      if (type === 'batch') {
-        if (!stores.some((store) => store.id === form.storeId) || !products.some((product) => product.id === form.productId)) return setNotice(t.invalidQty);
-        if (data.rows.some((row) => row.batch === batch && row.storeId === form.storeId)) return setNotice('Batch sudah tercatat pada gerai ini.');
-        updateData((previous) => ({ ...previous, rows: [{ id: newId(), batch, storeId: form.storeId, productId: form.productId, opening: quantity, received: 0, sold: 0, damaged: 0, returned: 0, physical: quantity, expires: form.expires }, ...previous.rows] }));
-      } else {
-        if (data.production.some((item) => item.batch === batch)) return setNotice('Nomor batch produksi sudah tercatat.');
-        updateData((previous) => ({ ...previous, production: [{ id: newId(), batch, requestId: null, storeId: null, productId: form.productId, quantity, available: quantity, expires: form.expires, created: todayISO(), status: 'Diseduh' }, ...previous.production] }));
-      }
-    } else if (type === 'approve') {
-      try {
-        const result = approveRequestToProduction(dataRef.current, form.requestId, { expires: form.expires, makeId: newId, date: todayISO() });
-        updateData(() => result.data);
-      } catch (err) { setNotice(err.message); return; }
-      setModal(null);
-      setNotice(t.approved);
-      return;
-    } else if (type === 'receive') {
-      try {
-        const next = applyReceipt(dataRef.current, form.requestId, form.lines.map((l) => ({ productId: l.productId, good: Number(l.good) || 0, retur: Number(l.retur) || 0 })), { date: todayISO(), makeId: newId });
-        updateData(() => next);
-      } catch (err) { setNotice(err.message); return; }
-      setModal(null);
-      setNotice(t.receivedSaved);
-      return;
-    } else if (type === 'shiftEdit') {
-      try {
-        const next = reviseShiftReport(dataRef.current, {
-          reportId: form.reportId,
-          storeId: selectedStore,
+    try {
+      if (type === 'product' || type === 'productEdit') {
+        const name = form.name?.trim();
+        if (!name) return;
+        if (!Number.isInteger(Number(form.price)) || Number(form.price) < 1) return setNotice(t.invalidQty);
+        const record = {
+          name, price: Number(form.price),
+          image: form.image?.trim() || null,
+          notes: form.notes?.trim() || '',
+          roast: form.roast?.trim() || '',
+          origin: form.origin?.trim() || '',
+          descId: form.descId?.trim() || '',
+          descEn: form.descEn?.trim() || '',
+        };
+        if (type === 'product') await mutate(api.createProduct(record));
+        else await mutate(api.updateProduct(form.id, record));
+      } else if (type === 'batch' || type === 'production') {
+        const quantity = Number(form.quantity);
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000) { setNotice(t.invalidQty); return; }
+        const batch = form.batch?.trim();
+        if (!batch || !form.expires || daysUntil(form.expires) < 0) return setNotice(t.invalidQty);
+        if (type === 'batch') {
+          if (!stores.some((store) => store.id === form.storeId) || !products.some((product) => product.id === form.productId)) return setNotice(t.invalidQty);
+          await mutate(api.createRow({ storeId: form.storeId, productId: form.productId, batch, quantity, expires: form.expires }));
+        } else {
+          await mutate(api.createProduction({ productId: form.productId, batch, quantity, expires: form.expires }));
+        }
+      } else if (type === 'approve') {
+        await mutate(api.approveRequest(form.requestId, { expires: form.expires }));
+        setModal(null);
+        setNotice(t.approved);
+        return;
+      } else if (type === 'receive') {
+        await mutate(api.receiveRequest(form.requestId, { lines: form.lines.map((l) => ({ productId: l.productId, good: Number(l.good) || 0, retur: Number(l.retur) || 0 })) }));
+        setModal(null);
+        setNotice(t.receivedSaved);
+        return;
+      } else if (type === 'shiftEdit') {
+        await mutate(api.reviseShift(form.reportId, {
           lines: (form.lines || []).map((l) => ({ productId: l.productId, qty: Number(l.qty) || 0, price: l.price || 0 })),
           actualTotal: Number(form.actualTotal) || 0,
           note: String(form.note || '').trim(),
-          makeId: newId,
-        });
-        updateData(() => next);
-      } catch (err) { setNotice(formatStockError(err)); return; }
+        }));
+        setModal(null);
+        setNotice('Ralat shift disimpan.');
+        return;
+      } else if (type === 'settings') {
+        const minStock = Number(form.minStock); const expiryDays = Number(form.expiryDays);
+        if (!Number.isInteger(minStock) || minStock < 1 || minStock > 10000 || !Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 30) return setNotice(t.invalidQty);
+        await mutate(api.updateSettings({ minStock, expiryDays }));
+      }
       setModal(null);
-      setNotice('Ralat shift disimpan.');
-      return;
-    } else if (type === 'settings') {
-      const minStock = Number(form.minStock); const expiryDays = Number(form.expiryDays);
-      if (!Number.isInteger(minStock) || minStock < 1 || minStock > 10000 || !Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 30) return setNotice(t.invalidQty);
-      updateData((previous) => ({ ...previous, settings: { minStock, expiryDays } }));
+      setNotice(t.updated);
+    } catch (err) {
+      setNotice(err.message);
     }
-    setModal(null);
-    setNotice(t.updated);
   }
 
-  function rejectRequest(request) {
-    updateData((previous) => ({ ...previous, requests: previous.requests.map((item) => item.id === request.id ? { ...item, status: 'Ditolak' } : item) }));
-    setNotice(t.rejected);
+  async function rejectRequest(request) {
+    try { await mutate(api.rejectRequest(request.id)); setNotice(t.rejected); }
+    catch (err) { setNotice(err.message); }
   }
-  function formatStockError(err) {
-    if (err?.productId) {
-      const name = productName(err.productId);
-      const stock = err.stock ?? realStockFor(dataRef.current.rows, err.productId, selectedStore);
-      return `Jumlah terjual melebihi stok gerai (${name}: stok ${number.format(stock)}, minta ${number.format(err.requested ?? 0)}).`;
-    }
-    return err?.message || t.invalidQty;
-  }
-  function shipRequest(request) {
-    const lines = normalizeRequest(request).lines;
-    const pool = dataRef.current.production.filter((b) => b.status === 'Siap kirim' && b.available > 0 && daysUntil(b.expires) >= 0 && (!b.requestId || b.requestId === request.id));
-    const grouped = allocateLinesFEFO(pool, lines);
-    if (!grouped) { setNotice(t.insufficientProduction); return; }
-    const createdByBatch = new Map(pool.map((b) => [b.id, b.created || request.created || todayISO()]));
-    const usedIds = new Set(grouped.flatMap((g) => g.allocations.map((a) => a.batchId)));
-    const flat = grouped.flatMap((g) => g.allocations.map((a) => ({ ...a, productId: g.productId, created: a.created || createdByBatch.get(a.batchId) || request.created || todayISO() })));
-    updateData((previous) => ({
-      ...previous,
-      production: previous.production.map((batch) => {
-        if (!usedIds.has(batch.id)) return batch;
-        const taken = flat.filter((a) => a.batchId === batch.id).reduce((s, a) => s + a.quantity, 0);
-        return { ...batch, available: batch.available - taken };
-      }),
-      requests: previous.requests.map((item) => item.id === request.id ? { ...item, status: 'Dikirim', allocations: flat } : item),
-    }));
-    setNotice(t.updated);
+  async function shipRequest(request) {
+    try { await mutate(api.shipRequest(request.id)); setNotice(t.updated); }
+    catch (err) { setNotice(err.message); }
   }
 
   function requestLines(request) {
@@ -452,7 +403,7 @@ export default function Dashboard() {
   }
   function shippedOf(request) {
     // List kiriman lengkap: qty + batch + expires + created, scoped via storeId request.
-    return shipmentLines(request, dataRef.current.production).map((l) => ({
+    return shipmentLines(request, data.production).map((l) => ({
       ...l, name: productName(l.productId),
     }));
   }
@@ -489,7 +440,7 @@ export default function Dashboard() {
 
   function production() {
     const groups = groupBatchesByRequest([...data.production].sort((a, b) => a.expires.localeCompare(b.expires)));
-    const markReady = (batch) => { updateData((previous) => ({ ...previous, production: previous.production.map((item) => item.id === batch.id ? { ...item, status: 'Siap kirim' } : item) })); setNotice(t.updated); };
+    const markReady = async (batch) => { try { await mutate(api.markReady(batch.id)); setNotice(t.updated); } catch (err) { setNotice(err.message); } };
     const batchTable = (batches) => <div className="table-responsive"><table className="table table-hover align-middle"><thead><tr><th scope="col">Batch</th><th scope="col">Produk</th><th scope="col">Kedaluwarsa</th><th scope="col">Tersedia</th><th scope="col">Status</th><th scope="col">Aksi</th></tr></thead><tbody>{batches.map((batch) => <tr key={batch.id}><td>{batch.batch}</td><td>{productName(batch.productId)}</td><td>{dateLabel(batch.expires)}</td><td>{number.format(batch.available)}</td><td><Status label={st(batch.status)} tone={toneFor(batch.status)} /></td><td>{batch.status === 'Diseduh' ? <button className="btn btn-outline-dark hb-btn-sm" onClick={() => markReady(batch)}>{t.markReady}</button> : <span className="hb-muted">{batch.available ? st('Siap kirim') : '—'}</span>}</td></tr>)}</tbody></table></div>;
     return <section><Heading title={t.nav.produksi} detail="Batch dari pesanan yang disetujui. Diseduh (lagi dibuat) → tandai siap → kirim ke gerai dari sini." action={products.length > 0 && <button className="btn hb-btn-gold" onClick={() => openModal('production', { productId: products[0].id, batch: '', quantity: '', expires: '' })}>Catat produksi</button>} />
       {groups.length ? groups.map((group) => {
@@ -532,14 +483,14 @@ export default function Dashboard() {
     return <section><Heading title={t.nav.master} detail="Gerai dari pendaftaran mitra. Admin hanya menyetujui atau menolak." />
       <div className="hb-master-grid">
         <div className="hb-panel"><Heading title={`${t.storesPending} (${pending.length})`} />
-          {pending.length ? <ul className="hb-simple-list">{pending.map((store) => <li key={store.id}><strong>{store.name}</strong><span className="hb-muted">{store.location}</span><span className="hb-muted">{store.ownerEmail}</span><div className="d-flex gap-2 mt-1"><button className="btn hb-btn-gold hb-btn-sm" onClick={() => { updateData((p) => ({ ...p, stores: approveStore(p.stores, store.id) })); setNotice(t.storeApproved); }}>{t.approveStore}</button><button className="btn btn-outline-dark hb-btn-sm" onClick={() => { updateData((p) => ({ ...p, stores: rejectStore(p.stores, store.id) })); setNotice(t.storeRejected); }}>{t.reject}</button></div></li>)}</ul> : <p className="hb-muted mb-0">—</p>}
+          {pending.length ? <ul className="hb-simple-list">{pending.map((store) => <li key={store.id}><strong>{store.name}</strong><span className="hb-muted">{store.location}</span><span className="hb-muted">{store.ownerEmail}</span><div className="d-flex gap-2 mt-1"><button className="btn hb-btn-gold hb-btn-sm" onClick={async () => { try { await mutate(api.approveStore(store.id)); setNotice(t.storeApproved); } catch (err) { setNotice(err.message); } }}>{t.approveStore}</button><button className="btn btn-outline-dark hb-btn-sm" onClick={async () => { try { await mutate(api.rejectStore(store.id)); setNotice(t.storeRejected); } catch (err) { setNotice(err.message); } }}>{t.reject}</button></div></li>)}</ul> : <p className="hb-muted mb-0">—</p>}
         </div>
         <div className="hb-panel"><Heading title={`${t.storesActive} (${active.length})`} />
           {active.length ? <ul className="hb-simple-list">{active.map((store) => <li key={store.id}><strong>{store.name}</strong><span className="hb-muted">{store.location}</span></li>)}</ul> : <EmptyState title="Belum ada gerai" detail="Gerai yang disetujui akan tampil di sini." />}
           {rejected.length > 0 && <><Heading title={`${t.storesRejected} (${rejected.length})`} /><ul className="hb-simple-list">{rejected.map((store) => <li key={store.id}><strong>{store.name}</strong><span className="hb-muted">{store.location}</span></li>)}</ul></>}
         </div>
       </div>
-      <div className="hb-panel mt-3"><Heading title="Produk" action={<div className="d-flex gap-2 flex-wrap"><button className="btn btn-outline-dark" onClick={() => { updateData((previous) => seedCentralCatalog(previous, newId)); setNotice(t.catalogLoaded); }}>{t.reloadCatalog}</button><button className="btn hb-btn-gold" onClick={() => openModal('product', { name: '', price: '', image: '', notes: '', roast: '', origin: '', descId: '', descEn: '' })}>Tambah produk</button></div>} />{products.length ? <ul className="hb-simple-list">{products.map((raw) => { const product = normalizeProduct(raw); return <li key={product.id} className="hb-product-row"><div className="d-flex gap-2 align-items-center">{product.image && <img src={product.image} alt={product.name} className="hb-thumb" loading="lazy" />}<div><strong>{product.name}</strong><span className="hb-muted d-block">{product.price ? money(product.price) : '—'}{product.notes ? ` · ${product.notes}` : ''}</span></div></div><div className="d-flex gap-2 mt-1"><button className="btn btn-outline-dark hb-btn-sm" onClick={() => openModal('productEdit', { id: product.id, name: product.name, price: product.price ?? '', image: product.image || '', notes: product.notes || '', roast: product.roast || '', origin: product.origin || '', descId: product.descId || '', descEn: product.descEn || '' })}>{t.edit}</button><button className="btn btn-outline-dark hb-btn-sm" onClick={() => { if (productInUse(dataRef.current, product.id)) { setNotice(t.inUseBlock); return; } if (window.confirm(`${t.del} ${product.name}?`)) { updateData((previous) => ({ ...previous, products: previous.products.filter((p) => p.id !== product.id) })); setNotice(t.updated); } }}>{t.del}</button></div></li>; })}</ul> : <EmptyState title="Belum ada produk" detail="Tambahkan produk katalog pusat." />}</div>
+      <div className="hb-panel mt-3"><Heading title="Produk" action={<div className="d-flex gap-2 flex-wrap"><button className="btn btn-outline-dark" onClick={async () => { try { await mutate(api.seedCatalog()); setNotice(t.catalogLoaded); } catch (err) { setNotice(err.message); } }}>{t.reloadCatalog}</button><button className="btn hb-btn-gold" onClick={() => openModal('product', { name: '', price: '', image: '', notes: '', roast: '', origin: '', descId: '', descEn: '' })}>Tambah produk</button></div>} />{products.length ? <ul className="hb-simple-list">{products.map((raw) => { const product = normalizeProduct(raw); return <li key={product.id} className="hb-product-row"><div className="d-flex gap-2 align-items-center">{product.image && <img src={product.image} alt={product.name} className="hb-thumb" loading="lazy" />}<div><strong>{product.name}</strong><span className="hb-muted d-block">{product.price ? money(product.price) : '—'}{product.notes ? ` · ${product.notes}` : ''}</span></div></div><div className="d-flex gap-2 mt-1"><button className="btn btn-outline-dark hb-btn-sm" onClick={() => openModal('productEdit', { id: product.id, name: product.name, price: product.price ?? '', image: product.image || '', notes: product.notes || '', roast: product.roast || '', origin: product.origin || '', descId: product.descId || '', descEn: product.descEn || '' })}>{t.edit}</button><button className="btn btn-outline-dark hb-btn-sm" onClick={async () => { if (window.confirm(`${t.del} ${product.name}?`)) { try { await mutate(api.deleteProduct(product.id)); setNotice(t.updated); } catch (err) { setNotice(err.message); } } }}>{t.del}</button></div></li>; })}</ul> : <EmptyState title="Belum ada produk" detail="Tambahkan produk katalog pusat." />}</div>
     </section>;
   }
 
@@ -602,13 +553,12 @@ export default function Dashboard() {
         </dl>
         <label className="hb-cart-label" htmlFor="hb-shift-note">Catatan (opsional)</label>
         <input id="hb-shift-note" className="form-control mb-2" maxLength={200} value={shiftNote} onChange={(event) => setShiftNote(event.target.value)} />
-        <button className="btn hb-btn-gold w-100" type="button" disabled={!lines.length} onClick={() => {
+        <button className="btn hb-btn-gold w-100" type="button" disabled={!lines.length} onClick={async () => {
           try {
-            const next = applyShiftReport(dataRef.current, { storeId: selectedStore, lines: lines.map((l) => ({ productId: l.id, qty: l.qty, price: l.price })), actualTotal: Number(shiftCash) || 0, note: shiftNote.trim(), date: todayISO(), makeId: newId });
-            updateData(() => next);
+            await mutate(api.createShift({ lines: lines.map((l) => ({ productId: l.id, qty: l.qty, price: l.price })), actualTotal: Number(shiftCash) || 0, note: shiftNote.trim() }));
             setShiftQty({}); setShiftCash(''); setShiftNote('');
             setNotice(t.shiftSaved);
-          } catch (err) { setNotice(formatStockError(err)); }
+          } catch (err) { setNotice(err.message); }
         }}>{t.submitShift}</button>
       </aside>
     </div>
@@ -698,7 +648,7 @@ export default function Dashboard() {
 
   if (cssError) return <div className="hb-dashboard hb-wait" role="alert">Tampilan dashboard gagal dimuat. <button onClick={() => window.location.reload()}>Coba lagi</button></div>;
   if (phase === 'loading' || !cssReady) return <div className="hb-dashboard hb-wait" role="status">Menyiapkan dashboard...</div>;
-  if (phase === 'error') return <div className="hb-dashboard hb-wait" role="alert"><p>Data lokal tidak dapat dibaca.</p><button className="btn btn-outline-dark me-2" onClick={() => { setPhase('loading'); readLocalData(); }}>Coba lagi</button></div>;
+  if (phase === 'error') return <div className="hb-dashboard hb-wait" role="alert"><p>Data tidak dapat dimuat.</p><button className="btn btn-outline-dark me-2" onClick={() => { setPhase('loading'); loadData(); }}>Coba lagi</button></div>;
 
   if (!currentUser) {
     return <div className="hb-dashboard" data-bs-theme="light"><div className="hb-wait hb-gate" role="status">
@@ -712,7 +662,7 @@ export default function Dashboard() {
       <h1 className="h4">{waitingRejected ? t.waitingRejectedTitle : t.waitingTitle}</h1>
       <p className="hb-muted">{waitingRejected ? t.waitingRejectedDetail : t.waitingDetail}</p>
       <p className="hb-muted">{myStore ? `${myStore.name} · ${myStore.location}` : ''}</p>
-      <div className="d-flex gap-2 justify-content-center flex-wrap"><button className="btn hb-btn-gold" onClick={readLocalData}>{t.recheck}</button><button className="btn btn-outline-dark" onClick={logout}>{t.logout}</button><Link className="btn btn-outline-dark" to="/">{t.backToShop}</Link></div>
+      <div className="d-flex gap-2 justify-content-center flex-wrap"><button className="btn hb-btn-gold" onClick={loadData}>{t.recheck}</button><button className="btn btn-outline-dark" onClick={logout}>{t.logout}</button><Link className="btn btn-outline-dark" to="/">{t.backToShop}</Link></div>
     </div></div>;
   }
 

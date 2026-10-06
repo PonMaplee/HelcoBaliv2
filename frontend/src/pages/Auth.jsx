@@ -1,23 +1,15 @@
 /**
- * Auth.jsx — Gerai sign in / sign up (frontend-only).
+ * Auth.jsx — Gerai sign in / sign up (terhubung ke backend).
  *
- * - Login: email + password, session disimpan di SESSION_KEY.
- * - Signup: nama + email + password + nama gerai + lokasi gerai,
+ * - Login: email + password → token disimpan di localStorage.
+ * - Signup: nama + email + password + nama gerai + lokasi,
  *   membuat user staf + store berstatus "Diajukan" (menunggu admin).
  */
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { loginUser, restoreDashboardData, SESSION_KEY, signupUser, STORAGE_KEY } from './dashboardModel';
+import { api, setSession } from './dashboardApi';
 
 const inputClass = 'w-full bg-[#111] border border-white/10 rounded-none px-4 py-3.5 text-sm text-stone-200 placeholder:text-stone-600 focus:outline-none focus:border-amber-500/60 transition-colors';
-
-function readStore() {
-  try {
-    return restoreDashboardData(window.localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
 
 export default function Auth({ mode, t }) {
   const navigate = useNavigate();
@@ -25,31 +17,34 @@ export default function Auth({ mode, t }) {
   const [form, setForm] = useState({ name: '', email: '', password: '', storeName: '', location: '' });
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
   const set = (key) => (event) => setForm((old) => ({ ...old, [key]: event.target.value }));
 
-  function persist(data) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }
-
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
     setError('');
     setOk('');
-    const data = readStore();
-    if (!data) { setError('Browser storage unavailable.'); return; }
+    setBusy(true);
     try {
       if (isLogin) {
-        const user = loginUser(data, form.email, form.password);
-        window.localStorage.setItem(SESSION_KEY, JSON.stringify({ email: user.email }));
+        const { user, token } = await api.login(form.email, form.password);
+        setSession({ token, user });
         navigate('/dashboard', { replace: true });
       } else {
-        const created = signupUser(data, { name: form.name, email: form.email, password: form.password, storeName: form.storeName, location: form.location }, () => crypto.randomUUID());
-        persist(created.data);
+        await api.register({
+          name: form.name,
+          email: form.email,
+          password: form.password,
+          storeName: form.storeName,
+          location: form.location,
+        });
         setOk(t.auth.successSignup);
         window.setTimeout(() => navigate('/login', { replace: true }), 900);
       }
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -100,7 +95,7 @@ export default function Auth({ mode, t }) {
               </button>
             </div>
           )}
-          <button type="submit" className="w-full bg-white text-black font-semibold tracking-[0.2em] uppercase text-sm px-10 py-4 hover:bg-amber-500 transition-colors">
+          <button type="submit" disabled={busy} className="w-full bg-white text-black font-semibold tracking-[0.2em] uppercase text-sm px-10 py-4 hover:bg-amber-500 transition-colors disabled:opacity-60">
             {isLogin ? t.auth.loginBtn : t.auth.signupBtn}
           </button>
         </form>

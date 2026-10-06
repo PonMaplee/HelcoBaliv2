@@ -10,8 +10,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Notifications\Notifiable;
 use MongoDB\Laravel\Auth\User as MongoAuthenticatable;
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
+#[Fillable(['name', 'email', 'password', 'role', 'storeId', 'api_token'])]
+#[Hidden(['password', 'remember_token', 'api_token'])]
 class User extends MongoAuthenticatable
 {
     protected $collection = 'users';

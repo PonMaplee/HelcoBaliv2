@@ -7,7 +7,7 @@
  *  - "Find at Partners" button → navigates to `/#outlets`
  *
  * Data:
- *  - Products come from `locales.js → t.explore.products`
+ *  - Products fetched from `/api/products` (backend), filtered to coffee only
  *  - Animation variants from `lib/animations.js`
  */
 import { useEffect, useState } from 'react';
@@ -50,6 +50,39 @@ export default function Explore({ t, lang }) {
   /* Scroll to top on mount */
   useEffect(() => {
     window.scrollTo(0, 0);
+  }, []);
+
+  /* ── Products fetched from backend ── */
+  const [products, setProducts] = useState([]);
+  const [status, setStatus] = useState('loading');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/products', { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error('Produk tidak tersedia');
+        return response.json();
+      })
+      .then((list) => {
+        const items = (Array.isArray(list) ? list : [])
+          .filter((p) => p?.processing !== 'Merchandise' && p?.roast !== 'Accessory')
+          .map((p) => ({
+            id: p.id ?? p._id,
+            name: p.title,
+            // ponytail: DB hanya punya satu gambar per produk, jadi 250/500 berbagi gambar.
+            image250: p.image,
+            image500: p.image,
+            roast: p.roast,
+            origin: p.origin || '',
+            notes: p.notes || '',
+            desc: p.description || '',
+            isMerch: false,
+          }));
+        setProducts(items);
+        setStatus('ready');
+      })
+      .catch((error) => { if (error.name !== 'AbortError') setStatus('error'); });
+    return () => controller.abort();
   }, []);
 
   /* ── Size toggle state (per product) ── */
@@ -111,8 +144,15 @@ export default function Explore({ t, lang }) {
       </MotionDiv>
 
       {/* ── Product cards ── */}
+      {status === 'loading' ? (
+        <p role="status" className="text-center text-stone-500 py-16">Loading collection…</p>
+      ) : status === 'error' ? (
+        <p role="alert" className="text-center text-stone-500 py-16">Collection unavailable right now.</p>
+      ) : products.length === 0 ? (
+        <p role="status" className="text-center text-stone-500 py-16">No products yet.</p>
+      ) : (
       <div className="space-y-32">
-        {t.explore.products.map((product, idx) => {
+        {products.map((product, idx) => {
           const currentSize = selectedSizes[product.id] ?? PRODUCT_SIZES[0];
           const currentImage =
             currentSize === PRODUCT_SIZES[1] ? product.image500 : product.image250;
@@ -233,6 +273,7 @@ export default function Explore({ t, lang }) {
           );
         })}
       </div>
+      )}
     </main>
   );
 }

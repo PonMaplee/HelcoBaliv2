@@ -28,6 +28,7 @@ class Product extends Model
         'roast',
         'roastValue',
         'badgeType',
+        'origin',
         'description',
         'gallery',
         'image'
