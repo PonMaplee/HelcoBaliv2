@@ -15,6 +15,6 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction
 ENV PHP_CLI_SERVER_WORKERS=4
 EXPOSE 8000
 
-# ponytail: seed dijalankan sekali manual (bukan tiap start) — kalau tiap start, produk yang
-# ditambah lewat dashboard B2B bakal ke-reset ke 5 seed produk setiap server bangun dari tidur.
-CMD ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT"]
+# ponytail: db:seed tiap start (free tier ga ada Shell). Aman — Product cuma 5 seed & ga diubah app,
+# seedDashboard idempotent. Data B2B (CatalogProduct, stok, user) ga ke-truncate.
+CMD ["sh", "-c", "php artisan migrate --force && php artisan db:seed --force && php artisan serve --host=0.0.0.0 --port=$PORT"]
