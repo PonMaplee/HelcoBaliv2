@@ -1,6 +1,6 @@
 FROM php:8.3-cli-alpine
 
-RUN apk add --no-cache $PHPIZE_DEPS git unzip openssl-dev \
+RUN apk add --no-cache $PHPIZE_DEPS git unzip openssl-dev oniguruma-dev \
  && docker-php-ext-install mbstring \
  && pecl install mongodb \
  && docker-php-ext-enable mongodb \
