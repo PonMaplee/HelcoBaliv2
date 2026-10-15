@@ -1,4 +1,4 @@
-FROM php:8.3-cli-alpine
+FROM php:8.5-cli-alpine
 
 RUN apk add --no-cache $PHPIZE_DEPS git unzip openssl-dev oniguruma-dev \
  && docker-php-ext-install mbstring \
