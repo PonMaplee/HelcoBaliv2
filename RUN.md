@@ -4,7 +4,7 @@ Monorepo with two apps:
 
 ```
 remake helco/
-├── backend/    Laravel 13 API (MongoDB) — products & cart
+├── backend/    Laravel 13 API (MongoDB) — products
 └── frontend/   React 19 + Vite storefront (kopi-premium-web)
 ```
 

@@ -202,7 +202,7 @@ export default function Home({ t }) {
                 />
                 <div className="text-right md:text-left">
                   <h3 className="text-2xl md:text-3xl font-serif text-white mb-1 md:mb-2 leading-tight">
-                    18 <span className="italic text-stone-400">Hours</span>
+                    {t.story.title1}
                   </h3>
                   <span className="hidden md:block h-px w-12 bg-amber-500/50 mb-4" />
                   <p className="text-stone-400 text-[10px] md:text-xs tracking-widest uppercase font-medium">

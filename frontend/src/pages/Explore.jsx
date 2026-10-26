@@ -28,13 +28,13 @@ const SEO_CONTENT = {
     title:
       'Koleksi Cold Brew – La Plaga, La Kintamani, La Pupuan | Helco Bali',
     description:
-      'Jelajahi 3 varian cold brew eksklusif Helco Bali: La Plaga (Arabika+Robusta+Liberika), La Kintamani (Dark & Bold), dan La Pupuan (Liberika fruity). Diseduh 18 jam.',
+      'Jelajahi 3 varian cold brew eksklusif Helco Bali: La Plaga (Arabika+Robusta+Liberika), La Kintamani (Dark & Bold), dan La Pupuan (Liberika fruity).',
   },
   en: {
     title:
       'Cold Brew Collection – La Plaga, La Kintamani, La Pupuan | Helco Bali',
     description:
-      "Explore Helco Bali's 3 exclusive cold brews: La Plaga (Arabica+Robusta+Liberica blend), La Kintamani (Dark & Bold), and La Pupuan (fruity Liberica-forward). 18-hour steep.",
+      "Explore Helco Bali's 3 exclusive cold brews: La Plaga (Arabica+Robusta+Liberica blend), La Kintamani (Dark & Bold), and La Pupuan (fruity Liberica-forward).",
   },
 };
 

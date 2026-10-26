@@ -55,13 +55,13 @@ export const locales = {
       subtitle: "Crafted for the few",
       title1: "The Art of Brewing",
       title2: "Time.",
-      desc: "Exclusive. Limited. We dedicate 18 hours per drop to preserve a perfect and unparalleled flavor profile.",
+      desc: "Exclusive. Limited. Each drop is crafted to preserve a perfect and unparalleled flavor profile.",
       btn: "Explore Flavors"
     },
     story: {
       title1: "The Patience",
       title2: "Behind the Drop.",
-      p1: "In a world obsessed with speed, we chose the slower path. HelcoBali was born from a simple belief: true character cannot be rushed. Our journey revolves around an uncompromising 18-hour slow-steep process, carefully coaxing out the deepest, smoothest notes from our handpicked beans.",
+      p1: "In a world obsessed with speed, we chose the slower path. HelcoBali was born from a simple belief: true character cannot be rushed. We carefully coax the deepest, smoothest notes from our handpicked beans.",
       p2: "We refuse to conform to mass production. Every bottle is an intimate testament to the art of waiting, crafted strictly in weekly small-batches to ensure pristine freshness.",
       p3: "For this reason, we don't serve everyone. We proudly entrust our delicate craft exclusively to partner purveyors who share our reverence for high-end artisan coffee."
     },
@@ -133,7 +133,7 @@ export const locales = {
     footer: "HelcoBali Artisan Cold Brew. Bali, Indonesia.",
     footerSection: {
       tagline: "Cold Brew Artisan · Bali",
-      desc: "Handcrafted cold brew from the highlands of Bali. Three origins. 18 hours. Exclusively distributed.",
+      desc: "Handcrafted cold brew from the highlands of Bali. Three origins. Exclusively distributed.",
       navigate: "Navigate",
       products: "Products",
       followUs: "Follow Us"
@@ -174,13 +174,13 @@ export const locales = {
       subtitle: "Crafted for the few",
       title1: "Seni Menyeduh",
       title2: "Waktu.",
-      desc: "Eksklusif. Terbatas. Kami mendedikasikan 18 jam untuk setiap tetesnya demi menjaga profil rasa yang sempurna dan tak tertandingi.",
+      desc: "Eksklusif. Terbatas. Setiap tetes dibuat untuk menjaga profil rasa yang sempurna dan tak tertandingi.",
       btn: "Eksplorasi Rasa"
     },
     story: {
       title1: "Kesabaran",
       title2: "Di Balik Setiap Tetes.",
-      p1: "Di dunia yang terobsesi dengan kecepatan, kami memilih jalan yang lebih lambat. HelcoBali lahir dari keyakinan sederhana: karakter sejati tidak dapat diburu-buru. Perjalanan kami berpusat pada proses penyeduhan perlahan selama 18 jam tanpa kompromi, mengekstrak profil rasa terdalam dan terhalus dari biji kopi pilihan kami.",
+      p1: "Di dunia yang terobsesi dengan kecepatan, kami memilih jalan yang lebih lambat. HelcoBali lahir dari keyakinan sederhana: karakter sejati tidak dapat diburu-buru. Kami memunculkan profil rasa terdalam dan terhalus dari biji kopi pilihan kami.",
       p2: "Kami menolak untuk memproduksi secara massal. Setiap botol adalah bukti nyata dari seni menunggu, diseduh secara ketat dalam jumlah kecil setiap minggunya untuk memastikan kesegaran yang sempurna.",
       p3: "Oleh karena itu, kami tidak melayani semua orang. Kami mempercayakan mahakarya ini secara eksklusif hanya kepada peritel mitra yang memiliki penghargaan yang sama terhadap standar tinggi sebuah kopi artisan."
     },
@@ -252,7 +252,7 @@ export const locales = {
     footer: "HelcoBali Artisan Cold Brew. Bali, Indonesia.",
     footerSection: {
       tagline: "Cold Brew Artisan · Bali",
-      desc: "Kopi cold brew buatan tangan dari dataran tinggi Bali. Tiga asal. 18 jam. Distribusi eksklusif.",
+      desc: "Kopi cold brew buatan tangan dari dataran tinggi Bali. Tiga asal. Distribusi eksklusif.",
       navigate: "Navigasi",
       products: "Produk",
       followUs: "Ikuti Kami"

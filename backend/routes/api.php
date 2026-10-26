@@ -15,13 +15,6 @@ Route::get('/products', [ApiController::class, 'getProducts']);
 // Menampilkan spesifik 1 produk (Product Detail)
 Route::get('/products/{id}', [ApiController::class, 'getProductById']);
 
-// Mengelola keranjang belanja (Cart)
-Route::get('/cart', [ApiController::class, 'getCart']);
-Route::post('/cart', [ApiController::class, 'addToCart']);
-Route::put('/cart/{id}', [ApiController::class, 'updateCartItem']);
-Route::delete('/cart', [ApiController::class, 'clearCart']);
-Route::delete('/cart/{id}', [ApiController::class, 'removeFromCart']);
-
 // ── Dashboard B2B (backend penuh per entity) ──
 Route::prefix('dashboard')->group(function () {
     // Auth publik

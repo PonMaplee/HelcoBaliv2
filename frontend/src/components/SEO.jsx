@@ -22,13 +22,13 @@ const DEFAULTS = {
     title:
       'Helco Bali – Cold Brew Kopi Arabika, Robusta & Liberika | Bali',
     description:
-      'Helco Bali menghadirkan cold brew premium dengan 3 biji pilihan: Arabika, Robusta, dan Liberika langka dari dataran tinggi Bali. Diseduh 18 jam. Eksklusif. Terbatas.',
+      'Helco Bali menghadirkan cold brew premium dengan 3 biji pilihan: Arabika, Robusta, dan Liberika langka dari dataran tinggi Bali. Eksklusif. Terbatas.',
   },
   en: {
     title:
       'Helco Bali – Artisan Cold Brew Coffee | Arabica, Robusta & Liberica',
     description:
-      "Helco Bali crafts premium cold brew from 3 distinct beans: Arabica, Robusta, and rare Liberica from Bali's highlands. 18-hour slow-steep. Exclusive. Limited.",
+      "Helco Bali crafts premium cold brew from 3 distinct beans: Arabica, Robusta, and rare Liberica from Bali's highlands. Exclusive. Limited.",
   },
 };
 
