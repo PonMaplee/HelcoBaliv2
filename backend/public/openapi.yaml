@@ -1,0 +1,1911 @@
+openapi: 3.0.3
+info:
+  title: Helco Bali API
+  version: "1.0.0"
+  license:
+    name: MIT
+  description: |
+    Public storefront catalog and the B2B dashboard API.
+
+    Collection `GET`s return `{ data, meta }`. `meta.last_page` is `max(1, ceil(total / per_page))`.
+    Creates and updates return the full scoped arrays the dashboard merges, not a page.
+
+    `page` below 1 is treated as 1. `per_page` below 1 becomes 20 and values above 100 are clamped to 100.
+    `q` is trimmed and matched as a case-insensitive escaped regular expression.
+    `sort` outside the operation allow-list falls back to that operation's default.
+    `order` is `desc` only when the value is `desc`; every other value is `asc`.
+
+    String inputs on `/api/*` are trimmed, HTML tags and NUL bytes are stripped, and object keys
+    starting with `$` are dropped. `password` is only stripped of NUL bytes.
+
+    Dashboard lists are scoped to the caller's store when the role is `staff`. Admins see every store.
+    `GET /api/dashboard/products` seeds the admin user, the three-coffee catalog, and settings when they are missing.
+servers:
+  - url: /
+    description: Laravel origin. Paths already include `/api`.
+tags:
+  - name: Storefront
+    description: Public product catalog used by the marketing site.
+  - name: Auth
+    description: Partner registration, login, and the current session.
+  - name: Catalog
+    description: Central B2B product catalog.
+  - name: Stores
+    description: Partner stores and approval.
+  - name: Stock
+    description: Physical stock rows per store, product, and batch.
+  - name: Requests
+    description: Restock and POS orders.
+  - name: Production
+    description: Central brewing batches.
+  - name: Shifts
+    description: End-of-shift sales reports.
+  - name: Activities
+    description: Stock movements (sold, return, correction).
+  - name: Settings
+    description: Global low-stock and expiry warning settings.
+  - name: Docs
+    description: This specification and the Swagger UI page.
+security:
+  - bearerAuth: []
+paths:
+  /api/products:
+    get:
+      tags: [Storefront]
+      operationId: listPublicProducts
+      summary: List public products
+      security: []
+      description: |
+        Search fields are `title`, `origin`, `notes`, and `roast`.
+        Sort allow-list is `title`, `price`, `origin`, `roast`. Default sort is `title` ascending.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/order'
+        - name: sort
+          in: query
+          description: Allow-list `title`, `price`, `origin`, `roast`. Anything else falls back to `title`.
+          schema:
+            type: string
+            default: title
+            example: title
+      responses:
+        '200':
+          description: One page of storefront products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicProductPage'
+
+  /api/products/{id}:
+    get:
+      tags: [Storefront]
+      operationId: getPublicProduct
+      summary: Get one public product
+      security: []
+      description: The path value is cast to an integer before lookup. Missing ids return 404.
+      parameters:
+        - $ref: '#/components/parameters/publicProductId'
+      responses:
+        '200':
+          description: The product document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicProduct'
+        '404':
+          description: No product with that numeric id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Produk tidak ditemukan
+
+  /api/dashboard/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Register a partner store and staff user
+      security: []
+      description: |
+        Creates a store with status `Diajukan` and a user with role `staff`.
+        Duplicate email returns 400 `Email sudah terdaftar. Silakan masuk.`
+        Duplicate store name (case-insensitive) returns 400 `Nama gerai sudah terdaftar.`
+        Those business-rule responses have `message` only. Invalid fields return `message` and `errors`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User, store, and a JWT access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/dashboard/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in
+      security: []
+      description: |
+        Invalid fields return 400 `{ message, errors }`.
+        Unknown email or wrong password returns 401 `Email atau kata sandi salah.` with no `errors` object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: User and a JWT access token. The store is not included.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Credentials were rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Email atau kata sandi salah.
+
+  /api/dashboard/me:
+    get:
+      tags: [Auth]
+      operationId: currentUser
+      summary: Current user and store
+      description: "`store` is null when the user has no `storeId` (the seeded admin)."
+      responses:
+        '200':
+          description: The authenticated user and, when present, their store.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/dashboard/products:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogProducts
+      summary: List catalog products
+      description: |
+        Search fields are `name`, `origin`, `notes`, and `roast`.
+        Sort allow-list is `name`, `price`, `origin`. Default sort is `name` ascending.
+        Calling this route seeds the admin, the three central coffees, and settings when missing.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/order'
+        - name: sort
+          in: query
+          description: Allow-list `name`, `price`, `origin`. Anything else falls back to `name`.
+          schema:
+            type: string
+            default: name
+            example: name
+      responses:
+        '200':
+          description: One page of catalog products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProductPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Catalog]
+      operationId: createCatalogProduct
+      summary: Create a catalog product
+      description: |
+        Admin only. A case-insensitive duplicate name returns 400 `Produk tersebut sudah dicatat.`
+        The 201 body is every catalog product ordered by name, not the single created row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductWrite'
+      responses:
+        '201':
+          description: Full catalog, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProductList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/products/seed:
+    post:
+      tags: [Catalog]
+      operationId: seedCatalog
+      summary: Upsert the three central coffees
+      description: |
+        Admin only. No body. Inserts or refreshes LA KINTAMANI, LA PLAGA, and LA PUPUAN.
+        Response is the full catalog ordered by name.
+      responses:
+        '200':
+          description: Full catalog, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProductList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/products/{id}:
+    put:
+      tags: [Catalog]
+      operationId: updateCatalogProduct
+      summary: Replace a catalog product
+      description: |
+        Admin only. Missing id returns 404 `Produk tidak ditemukan.`
+        A name that belongs to a different product returns 400 `Produk tersebut sudah dicatat.`
+        Success returns the full catalog ordered by name.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductWrite'
+      responses:
+        '200':
+          description: Full catalog, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProductList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No catalog product with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Produk tidak ditemukan.
+    delete:
+      tags: [Catalog]
+      operationId: deleteCatalogProduct
+      summary: Delete a catalog product
+      description: |
+        Admin only. Returns 400 `Produk sedang dipakai dan tidak bisa dihapus.` when a stock row,
+        restock request, or production batch still references the id.
+        A missing id is not a 404. The product is deleted when found, and the response is the remaining catalog ordered by name.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      responses:
+        '200':
+          description: Remaining catalog, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProductList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/stores:
+    get:
+      tags: [Stores]
+      operationId: listStores
+      summary: List stores
+      description: |
+        Staff receive only their own store. Search fields are `name`, `location`, `status`, and `ownerEmail`.
+        Sort allow-list is `name`, `status`, `location`. Default sort is `name` ascending.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/order'
+        - name: sort
+          in: query
+          description: Allow-list `name`, `status`, `location`. Anything else falls back to `name`.
+          schema:
+            type: string
+            default: name
+            example: name
+      responses:
+        '200':
+          description: One page of stores.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/dashboard/stores/{id}/approve:
+    patch:
+      tags: [Stores]
+      operationId: approveStore
+      summary: Approve a store
+      description: |
+        Admin only. Sets status to `Disetujui`. No body.
+        A missing id still returns 200 with the current store list ordered by name.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      responses:
+        '200':
+          description: Every store, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/stores/{id}/reject:
+    patch:
+      tags: [Stores]
+      operationId: rejectStore
+      summary: Reject a store
+      description: |
+        Admin only. Sets status to `Ditolak`. No body.
+        A missing id still returns 200 with the current store list ordered by name.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      responses:
+        '200':
+          description: Every store, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/rows:
+    get:
+      tags: [Stock]
+      operationId: listStockRows
+      summary: List stock rows
+      description: |
+        Staff see only their store. `q` matches the batch code, or a catalog product name, origin, or notes,
+        or a store name. Sort allow-list is `expires`, `batch`, `created`, `physical`. Default sort is `expires` ascending.
+        Stock status (in stock, low, expired) is derived by the client and is not a query parameter.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - $ref: '#/components/parameters/order'
+        - name: sort
+          in: query
+          description: Allow-list `expires`, `batch`, `created`, `physical`. Anything else falls back to `expires`.
+          schema:
+            type: string
+            default: expires
+            example: expires
+      responses:
+        '200':
+          description: One page of stock rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockRowPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Stock]
+      operationId: createStockRow
+      summary: Add an opening stock row
+      description: |
+        Admin only. The same batch code in the same store returns 400 `Batch sudah tercatat pada gerai ini.`
+        The row is stored with `opening` and `physical` equal to `quantity`, other counters 0, and `created` as today's date.
+        The 201 body is every stock row visible to the caller, not a page.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockRowWrite'
+      responses:
+        '201':
+          description: Scoped stock rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockRowList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/requests:
+    get:
+      tags: [Requests]
+      operationId: listRequests
+      summary: List restock requests
+      description: |
+        Staff see only their store. Search fields are `customer`, `receiptId`, `status`, and `note`.
+        Optional `status` is an exact match in addition to `q`.
+        Sort allow-list is `created`, `status`, `total`, `receiptId`. Default sort is `created` descending.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - name: status
+          in: query
+          description: |
+            Exact status match. Values written by the API are `Diajukan`, `Produksi`, `Dikirim`, `Diterima`, and `Ditolak`.
+            Any other string is accepted and matches only documents already stored with that value.
+          schema:
+            type: string
+            example: Diajukan
+        - name: sort
+          in: query
+          description: Allow-list `created`, `status`, `total`, `receiptId`. Anything else falls back to `created`.
+          schema:
+            type: string
+            default: created
+            example: created
+        - name: order
+          in: query
+          description: Any value other than `desc` is treated as `asc`. Default for this list is `desc`.
+          schema:
+            type: string
+            default: desc
+            example: desc
+      responses:
+        '200':
+          description: One page of requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestockRequestPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Requests]
+      operationId: createRequest
+      summary: Create a POS or restock order
+      description: |
+        Any authenticated user. The order is stored on the caller's `storeId` with status `Diajukan` and source `pos`.
+        `receiptId` is generated. Empty customer becomes `Walk-in`.
+        The 201 body is every request visible to the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestockRequestWrite'
+      responses:
+        '201':
+          description: Scoped requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestockRequestList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/dashboard/requests/{id}/approve:
+    post:
+      tags: [Requests]
+      operationId: approveRequest
+      summary: Approve a request and start production
+      description: |
+        Admin only. The request must exist and have status `Diajukan`, and `expires` must not be in the past.
+        Creates one `Diseduh` production batch per line and sets the request to `Produksi`.
+        404 `Permintaan tidak ditemukan.` 400 `Permintaan tidak valid.` or `Tanggal kedaluwarsa batch belum valid.`
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+      responses:
+        '200':
+          description: Scoped requests and, for an admin, every production batch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestProductionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No request with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Permintaan tidak ditemukan.
+
+  /api/dashboard/requests/{id}/reject:
+    post:
+      tags: [Requests]
+      operationId: rejectRequest
+      summary: Reject a request
+      description: |
+        Admin only. Sets status to `Ditolak`. No body.
+        A missing id still returns 200 with the scoped request list.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      responses:
+        '200':
+          description: Scoped requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestockRequestList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/requests/{id}/ship:
+    post:
+      tags: [Requests]
+      operationId: shipRequest
+      summary: Ship a request from ready production
+      description: |
+        Admin only. No body. The request must exist and have status `Produksi`.
+        Allocates `Siap kirim` production with remaining quantity, soonest expiry first, and sets status to `Dikirim`.
+        404 `Permintaan tidak ditemukan.`
+        400 `Permintaan belum siap dikirim.` or `Produksi belum cukup untuk dikirim.`
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      responses:
+        '200':
+          description: Scoped requests and production batches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestProductionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No request with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Permintaan tidak ditemukan.
+
+  /api/dashboard/requests/{id}/receive:
+    post:
+      tags: [Requests]
+      operationId: receiveRequest
+      summary: Receive a shipment into store stock
+      description: |
+        The request must belong to the caller's store and have status `Dikirim`.
+        For each shipped product, `good + retur` must equal the shipped quantity and both numbers must be at least 0.
+        Good units are added to stock. Returns are recorded as activities with kind `retur`. Status becomes `Diterima`.
+        404 `Permintaan tidak ditemukan.`
+        400 `Kiriman tidak valid.`, `Jumlah siap jual dan retur harus bilangan bulat ≥ 0.`,
+        or `Jumlah siap jual + retur harus sama dengan jumlah terkirim.`
+        The validator only requires `lines` to be an array. Quantity rules are checked afterward and return `message` only.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiveRequest'
+      responses:
+        '200':
+          description: Scoped requests, stock rows, and activities.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiveResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No request with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Permintaan tidak ditemukan.
+
+  /api/dashboard/production:
+    get:
+      tags: [Production]
+      operationId: listProduction
+      summary: List production batches
+      description: |
+        Admin only in effect. A non-admin still receives 200 with an empty page (`data: []`, `total: 0`, `current_page: 1`).
+        Search fields are `batch` and `status`. Optional `status` is an exact match.
+        Sort allow-list is `expires`, `batch`, `status`, `created`. Default sort is `expires` ascending.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - name: status
+          in: query
+          description: |
+            Exact status match. Values written by the API are `Diseduh` and `Siap kirim`.
+            Any other string is accepted and matches only documents already stored with that value.
+          schema:
+            type: string
+            example: Diseduh
+        - name: sort
+          in: query
+          description: Allow-list `expires`, `batch`, `status`, `created`. Anything else falls back to `expires`.
+          schema:
+            type: string
+            default: expires
+            example: expires
+        - $ref: '#/components/parameters/order'
+      responses:
+        '200':
+          description: One page of production batches, or an empty page for non-admins.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Production]
+      operationId: createProduction
+      summary: Record a production batch
+      description: |
+        Admin only. Duplicate batch code returns 400 `Nomor batch produksi sudah tercatat.`
+        The batch is stored with status `Diseduh`, `available` equal to `quantity`, and no request or store.
+        The 201 body is every production batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductionWrite'
+      responses:
+        '201':
+          description: Every production batch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/production/{id}/ready:
+    patch:
+      tags: [Production]
+      operationId: markProductionReady
+      summary: Mark a batch ready to ship
+      description: |
+        Admin only. Sets status to `Siap kirim`. No body.
+        A missing id still returns 200 with every production batch.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      responses:
+        '200':
+          description: Every production batch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/dashboard/shifts:
+    get:
+      tags: [Shifts]
+      operationId: listShifts
+      summary: List shift reports
+      description: |
+        Staff see only their store. Search fields are `note` and `date`.
+        Sort allow-list is `date`, `difference`, `actualTotal`. Default sort is `date` descending.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - name: sort
+          in: query
+          description: Allow-list `date`, `difference`, `actualTotal`. Anything else falls back to `date`.
+          schema:
+            type: string
+            default: date
+            example: date
+        - name: order
+          in: query
+          description: Any value other than `desc` is treated as `asc`. Default for this list is `desc`.
+          schema:
+            type: string
+            default: desc
+            example: desc
+      responses:
+        '200':
+          description: One page of shift reports.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftReportPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Shifts]
+      operationId: createShift
+      summary: Close a shift
+      description: |
+        Stored on the caller's store for today's date. Selling more than physical stock returns
+        400 `Jumlah terjual melebihi stok gerai.` (`message` only).
+        Stock is deducted soonest-expiry first and activities with kind `terjual` are written.
+        `difference` is `actualTotal - expectedTotal`. The 201 body includes scoped reports, rows, and activities.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShiftWrite'
+      responses:
+        '201':
+          description: Scoped shift reports, stock rows, and activities.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/dashboard/shifts/{id}/revise:
+    post:
+      tags: [Shifts]
+      operationId: reviseShift
+      summary: Revise a shift report
+      description: |
+        The report must exist and belong to the caller's store.
+        404 `Laporan tidak ditemukan.` 403 `Laporan ini milik gerai lain.`
+        Quantity above stock plus the quantity already on this report returns 400 `Jumlah terjual melebihi stok gerai.`
+        The previous deduction is rolled back, the new lines are applied, and a `koreksi` activity is added.
+      parameters:
+        - $ref: '#/components/parameters/mongoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShiftWrite'
+      responses:
+        '200':
+          description: Scoped shift reports, stock rows, and activities.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The report belongs to another store.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Laporan ini milik gerai lain.
+        '404':
+          description: No shift report with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Laporan tidak ditemukan.
+
+  /api/dashboard/activities:
+    get:
+      tags: [Activities]
+      operationId: listActivities
+      summary: List stock activities
+      description: |
+        Staff see only their store. Search fields are `batch`, `kind`, and `note`.
+        Optional `kind` is an exact match. Values written by the API are `terjual`, `retur`, and `koreksi`.
+        Sort allow-list is `date`, `kind`, `quantity`. Default sort is `date` descending.
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/perPage'
+        - $ref: '#/components/parameters/q'
+        - name: kind
+          in: query
+          description: |
+            Exact kind match. Known values are `terjual`, `retur`, and `koreksi`.
+            Any other string is accepted and matches only documents already stored with that value.
+          schema:
+            type: string
+            example: terjual
+        - name: sort
+          in: query
+          description: Allow-list `date`, `kind`, `quantity`. Anything else falls back to `date`.
+          schema:
+            type: string
+            default: date
+            example: date
+        - name: order
+          in: query
+          description: Any value other than `desc` is treated as `asc`. Default for this list is `desc`.
+          schema:
+            type: string
+            default: desc
+            example: desc
+      responses:
+        '200':
+          description: One page of activities.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/dashboard/settings:
+    get:
+      tags: [Settings]
+      operationId: getSettings
+      summary: Read dashboard settings
+      description: |
+        Any authenticated user. The body is the settings object itself, not wrapped.
+        When no document exists, `minStock` is null and `expiryDays` is 7.
+      responses:
+        '200':
+          description: Current settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Settings]
+      operationId: updateSettings
+      summary: Update dashboard settings
+      description: Admin only. Returns the saved values under `settings`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsWrite'
+      responses:
+        '200':
+          description: Saved settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsUpdateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /docs:
+    get:
+      tags: [Docs]
+      operationId: swaggerUi
+      summary: Swagger UI
+      security: []
+      description: HTML page that loads this specification from `GET /openapi.yaml`.
+      responses:
+        '200':
+          description: Swagger UI HTML.
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /openapi.yaml:
+    get:
+      tags: [Docs]
+      operationId: openApiDocument
+      summary: OpenAPI document
+      security: []
+      description: The same document committed at `docs/openapi.yaml` and `backend/public/openapi.yaml`.
+      responses:
+        '200':
+          description: This OpenAPI document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '404':
+          description: The YAML file is not present on the server.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 JWT from `POST /api/dashboard/login` or `POST /api/dashboard/register`.
+        Send `Authorization: Bearer <token>`.
+        Payload claims are `sub` (user id), `email`, `role`, `iat`, and `exp`.
+        Lifetime is `JWT_TTL` minutes (default 1440). The signer uses `JWT_SECRET`, or `APP_KEY` when that secret is empty.
+        Missing or invalid tokens return 401 `Tidak terautentikasi.`
+  parameters:
+    page:
+      name: page
+      in: query
+      description: Page number. Values below 1 are treated as 1.
+      schema:
+        type: integer
+        default: 1
+        example: 1
+    perPage:
+      name: per_page
+      in: query
+      description: Page size. Values below 1 become 20. Values above 100 are clamped to 100.
+      schema:
+        type: integer
+        default: 20
+        example: 20
+    q:
+      name: q
+      in: query
+      description: Case-insensitive substring search. The term is trimmed and matched as an escaped regular expression.
+      schema:
+        type: string
+        example: kintamani
+    order:
+      name: order
+      in: query
+      description: Any value other than `desc` is treated as `asc`. Default for this parameter is `asc` unless an operation says otherwise.
+      schema:
+        type: string
+        default: asc
+        example: asc
+    mongoId:
+      name: id
+      in: path
+      required: true
+      description: MongoDB document id.
+      schema:
+        type: string
+        example: 671f0c2a9b1e4c0012ab34cd
+    publicProductId:
+      name: id
+      in: path
+      required: true
+      description: Numeric storefront product id. The server casts the value with `(int)` before lookup.
+      schema:
+        type: integer
+        example: 1
+  responses:
+    BadRequest:
+      description: |
+        Form validation returns `message` plus `errors` (field name to a list of messages), status 400.
+        Business-rule failures return `message` only, also status 400.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          examples:
+            validation:
+              summary: Invalid field
+              value:
+                message: The name field is required.
+                errors:
+                  name:
+                    - The name field is required.
+            rule:
+              summary: Business rule
+              value:
+                message: Produk tersebut sudah dicatat.
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Tidak terautentikasi.
+    Forbidden:
+      description: The caller is authenticated but is not an admin.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Admin only
+  schemas:
+    Message:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    ErrorBody:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          description: Present on form validation. Omitted on business-rule failures.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    PageMeta:
+      type: object
+      required: [current_page, per_page, total, last_page]
+      properties:
+        current_page:
+          type: integer
+          example: 1
+        per_page:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 3
+        last_page:
+          type: integer
+          description: max(1, ceil(total / per_page))
+          example: 1
+    PublicProduct:
+      type: object
+      description: Storefront product. Seeded ids are integers.
+      properties:
+        id:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: LA KINTAMANI
+        price:
+          type: integer
+          example: 120000
+        notes:
+          type: string
+          nullable: true
+        processing:
+          type: string
+          nullable: true
+        roast:
+          type: string
+          nullable: true
+        roastValue:
+          type: string
+          nullable: true
+        badgeType:
+          type: string
+          nullable: true
+        origin:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        gallery:
+          type: array
+          items:
+            type: string
+        image:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    PublicProductPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicProduct'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    CatalogProduct:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          example: LA KINTAMANI
+        price:
+          type: integer
+          example: 120000
+        image:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        roast:
+          type: string
+          nullable: true
+        origin:
+          type: string
+          nullable: true
+        descId:
+          type: string
+          nullable: true
+        descEn:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    CatalogProductPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogProduct'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    CatalogProductList:
+      type: object
+      required: [products]
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogProduct'
+    CatalogProductWrite:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        price:
+          type: integer
+          minimum: 1
+        image:
+          type: string
+          nullable: true
+          maxLength: 200
+        notes:
+          type: string
+          nullable: true
+          maxLength: 160
+        roast:
+          type: string
+          nullable: true
+          maxLength: 100
+        origin:
+          type: string
+          nullable: true
+          maxLength: 100
+        descId:
+          type: string
+          nullable: true
+          maxLength: 500
+        descEn:
+          type: string
+          nullable: true
+          maxLength: 500
+    User:
+      type: object
+      description: "`password` and `remember_token` are hidden."
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          description: Values assigned by the API are `admin` and `staff`.
+          example: staff
+        storeId:
+          type: string
+          nullable: true
+        email_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    Store:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        location:
+          type: string
+        status:
+          type: string
+          description: Values written by the API are `Diajukan`, `Disetujui`, and `Ditolak`.
+          example: Diajukan
+        ownerEmail:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    StorePage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Store'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    StoreList:
+      type: object
+      required: [stores]
+      properties:
+        stores:
+          type: array
+          items:
+            $ref: '#/components/schemas/Store'
+    RegisterRequest:
+      type: object
+      required: [name, email, password, storeName, location]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 120
+        password:
+          type: string
+          minLength: 6
+          maxLength: 100
+        storeName:
+          type: string
+          maxLength: 100
+        location:
+          type: string
+          maxLength: 120
+    RegisterResponse:
+      type: object
+      required: [user, store, token]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        store:
+          $ref: '#/components/schemas/Store'
+        token:
+          type: string
+          description: HS256 JWT.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    LoginResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+    MeResponse:
+      type: object
+      required: [user, store]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        store:
+          type: object
+          nullable: true
+          description: Null when the user has no storeId. Otherwise a Store.
+          allOf:
+            - $ref: '#/components/schemas/Store'
+    StockRow:
+      type: object
+      properties:
+        id:
+          type: string
+        batch:
+          type: string
+        storeId:
+          type: string
+        productId:
+          type: string
+        opening:
+          type: integer
+        received:
+          type: integer
+        sold:
+          type: integer
+        damaged:
+          type: integer
+        returned:
+          type: integer
+        physical:
+          type: integer
+        expires:
+          type: string
+          format: date
+        created:
+          type: string
+          description: Date the row was recorded, `Y-m-d`.
+          example: "2026-10-26"
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    StockRowPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/StockRow'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    StockRowList:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/StockRow'
+    StockRowWrite:
+      type: object
+      required: [storeId, productId, batch, quantity, expires]
+      properties:
+        storeId:
+          type: string
+        productId:
+          type: string
+        batch:
+          type: string
+          maxLength: 80
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        expires:
+          type: string
+          format: date
+    OrderLine:
+      type: object
+      required: [productId, qty, price]
+      properties:
+        productId:
+          type: string
+        qty:
+          type: integer
+          minimum: 1
+        price:
+          type: integer
+          minimum: 0
+    RestockRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        storeId:
+          type: string
+          nullable: true
+        productId:
+          type: string
+        quantity:
+          type: integer
+        price:
+          type: integer
+        status:
+          type: string
+          description: Values written by the API are `Diajukan`, `Produksi`, `Dikirim`, `Diterima`, and `Ditolak`.
+          example: Diajukan
+        source:
+          type: string
+          example: pos
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderLine'
+        subtotal:
+          type: integer
+        discount:
+          type: integer
+        tax:
+          type: integer
+        total:
+          type: integer
+        method:
+          type: string
+        customer:
+          type: string
+        receiptId:
+          type: string
+          example: ORD-20261026-001
+        created:
+          type: string
+          example: "2026-10-26"
+        note:
+          type: string
+          nullable: true
+        allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Allocation'
+        received:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptLine'
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    RestockRequestPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestockRequest'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    RestockRequestList:
+      type: object
+      required: [requests]
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestockRequest'
+    RestockRequestWrite:
+      type: object
+      required: [method, total, lines]
+      properties:
+        customer:
+          type: string
+          nullable: true
+          maxLength: 100
+        method:
+          type: string
+          example: Cash
+        discount:
+          type: integer
+          minimum: 0
+          nullable: true
+        tax:
+          type: integer
+          minimum: 0
+          nullable: true
+        total:
+          type: integer
+          minimum: 1
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OrderLine'
+    ApproveRequest:
+      type: object
+      required: [expires]
+      properties:
+        expires:
+          type: string
+          format: date
+          description: Must not be before today.
+    Allocation:
+      type: object
+      properties:
+        batchId:
+          type: string
+        batch:
+          type: string
+        quantity:
+          type: integer
+        expires:
+          type: string
+        productId:
+          type: string
+        created:
+          type: string
+    ReceiptLine:
+      type: object
+      properties:
+        productId:
+          type: string
+          description: Read by the handler. Not enforced by the validator.
+        good:
+          type: integer
+          minimum: 0
+          description: Units accepted into stock. Not enforced by the validator.
+        retur:
+          type: integer
+          minimum: 0
+          description: Units returned. Not enforced by the validator.
+    ReceiveRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          description: One object per shipped product. `good + retur` must equal the shipped quantity.
+          items:
+            $ref: '#/components/schemas/ReceiptLine'
+    RequestProductionResult:
+      type: object
+      required: [requests, production]
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestockRequest'
+        production:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductionBatch'
+    ReceiveResult:
+      type: object
+      required: [requests, rows, activities]
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestockRequest'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/StockRow'
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+    ProductionBatch:
+      type: object
+      properties:
+        id:
+          type: string
+        batch:
+          type: string
+        requestId:
+          type: string
+          nullable: true
+        storeId:
+          type: string
+          nullable: true
+        productId:
+          type: string
+        quantity:
+          type: integer
+        available:
+          type: integer
+        expires:
+          type: string
+          format: date
+        created:
+          type: string
+          example: "2026-10-26"
+        status:
+          type: string
+          description: Values written by the API are `Diseduh` and `Siap kirim`.
+          example: Diseduh
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    ProductionPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductionBatch'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    ProductionList:
+      type: object
+      required: [production]
+      properties:
+        production:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductionBatch'
+    ProductionWrite:
+      type: object
+      required: [productId, batch, quantity, expires]
+      properties:
+        productId:
+          type: string
+        batch:
+          type: string
+          maxLength: 80
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        expires:
+          type: string
+          format: date
+    ShiftLine:
+      type: object
+      required: [productId, qty, price]
+      properties:
+        productId:
+          type: string
+        qty:
+          type: integer
+          minimum: 1
+        price:
+          type: integer
+          minimum: 0
+        subtotal:
+          type: integer
+          description: Present on stored report lines. Not sent on create.
+    ShiftReport:
+      type: object
+      properties:
+        id:
+          type: string
+        storeId:
+          type: string
+          nullable: true
+        date:
+          type: string
+          example: "2026-10-26"
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftLine'
+        expectedTotal:
+          type: integer
+        actualTotal:
+          type: integer
+        difference:
+          type: integer
+        note:
+          type: string
+          nullable: true
+        editedAt:
+          type: string
+          format: date-time
+          nullable: true
+        editCount:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    ShiftReportPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftReport'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    ShiftWrite:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [productId, qty, price]
+            properties:
+              productId:
+                type: string
+              qty:
+                type: integer
+                minimum: 1
+              price:
+                type: integer
+                minimum: 0
+        actualTotal:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Omitted or null is stored as 0.
+        note:
+          type: string
+          nullable: true
+          maxLength: 200
+    ShiftResult:
+      type: object
+      required: [shiftReports, rows, activities]
+      properties:
+        shiftReports:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftReport'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/StockRow'
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+    Activity:
+      type: object
+      properties:
+        id:
+          type: string
+        reportId:
+          type: string
+          nullable: true
+        rowId:
+          type: string
+          nullable: true
+        storeId:
+          type: string
+        productId:
+          type: string
+          nullable: true
+        batch:
+          type: string
+          nullable: true
+        kind:
+          type: string
+          description: Values written by the API are `terjual`, `retur`, and `koreksi`.
+          example: terjual
+        quantity:
+          type: integer
+        date:
+          type: string
+          example: "2026-10-26"
+        note:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    ActivityPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    Settings:
+      type: object
+      required: [minStock, expiryDays]
+      properties:
+        minStock:
+          type: integer
+          nullable: true
+          description: Null until an admin saves a value. The seeder creates the document with null.
+        expiryDays:
+          type: integer
+          example: 7
+    SettingsWrite:
+      type: object
+      required: [minStock, expiryDays]
+      properties:
+        minStock:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        expiryDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+    SettingsUpdateResponse:
+      type: object
+      required: [settings]
+      properties:
+        settings:
+          $ref: '#/components/schemas/SettingsWrite'

@@ -73,6 +73,12 @@ ADMIN_PASSWORD=admin123
 
 Main lists: public `GET /api/products` (`sort` title, price, origin, roast), dashboard `GET /api/dashboard/products`, `/rows` (stock batches), `/requests`, and `/production`. Invalid input on `/api/*` returns **400** with `{ message, errors }`. Creates return **201**. Missing records return **404**. Missing or invalid JWT returns **401**. Staff calling an admin route returns **403**.
 
+## API docs
+
+Swagger UI is `GET /docs` (for example `http://127.0.0.1:8000/docs`). The OpenAPI 3 document is `GET /openapi.yaml`. Both are served by Laravel, and the same YAML is also at `backend/public/openapi.yaml` for a static file server.
+
+A backend-free copy lives in `docs/` (`index.html` loads `./openapi.yaml`) for GitHub Pages.
+
 ## Tests
 
 PHPUnit uses the Mongo database `helco_test` on `127.0.0.1:27017` (see `backend/phpunit.xml`).
