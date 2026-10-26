@@ -37,13 +37,61 @@ DB_PORT=27017
 DB_DATABASE=helco_db
 ```
 
-Then migrate + seed the 5 sample products, and serve:
+Then migrate, create Mongo indexes, seed, and serve:
 
 ```bash
 php artisan migrate --force
+php artisan mongo:indexes
 php artisan db:seed --force
 php artisan serve --host=127.0.0.1 --port=8000
 ```
+
+`mongo:indexes` is idempotent. The Docker start command runs it after migrate. It no-ops unless `DB_CONNECTION=mongodb`.
+
+Set these in `.env` before the first seed:
+
+```
+JWT_SECRET=change-me
+JWT_TTL=1440
+ADMIN_EMAIL=admin@helcobali.id
+ADMIN_PASSWORD=admin123
+```
+
+`JWT_TTL` is the access-token lifetime in minutes (1440 = 24 hours). Tokens are HS256 JWTs from `firebase/php-jwt`, sent as `Authorization: Bearer`. If `JWT_SECRET` is empty, the signer uses `APP_KEY`. `ADMIN_PASSWORD` is the first-run admin password and is stored hashed. When the variable is unset, the seed falls back to `admin123` so a fresh database can still sign in at `admin@helcobali.id`. An existing admin user is not overwritten.
+
+## API list parameters
+
+`GET` collections return `{ "data": [], "meta": { "current_page", "per_page", "total", "last_page" } }`.
+
+| Param | Meaning |
+|-------|---------|
+| `page` | Page number, default 1 |
+| `per_page` | Page size, default 20, max 100 |
+| `q` | Case-insensitive text search |
+| `sort` | Allow-listed field |
+| `order` | `asc` or `desc` |
+
+Main lists: public `GET /api/products` (`sort` title, price, origin, roast), dashboard `GET /api/dashboard/products`, `/rows` (stock batches), `/requests`, and `/production`. Invalid input on `/api/*` returns **400** with `{ message, errors }`. Creates return **201**. Missing records return **404**. Missing or invalid JWT returns **401**. Staff calling an admin route returns **403**.
+
+## Tests
+
+PHPUnit uses the Mongo database `helco_test` on `127.0.0.1:27017` (see `backend/phpunit.xml`).
+
+```bash
+cd backend
+php artisan test
+```
+
+## Load test
+
+With the API already running:
+
+```bash
+cd backend
+php scripts/loadtest.php
+```
+
+Optional: `LOAD_URL`, `LOAD_CONCURRENCY` (default 10), `LOAD_REQUESTS` (default 40). The script prints min, average, p95, and max response times.
 
 Sanity check: `http://127.0.0.1:8000/api/products` should return JSON.
 

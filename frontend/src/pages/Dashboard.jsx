@@ -104,6 +104,13 @@ export default function Dashboard() {
   const [form, setForm] = useState({});
   const [notice, setNotice] = useState('');
   const [posQuery, setPosQuery] = useState('');
+  const [serverRows, setServerRows] = useState(null);
+  const [serverRowQuery, setServerRowQuery] = useState('');
+  const [serverPosIds, setServerPosIds] = useState(null);
+  const [serverPosQuery, setServerPosQuery] = useState('');
+  const [requestQuery, setRequestQuery] = useState('');
+  const [serverRequests, setServerRequests] = useState(null);
+  const [serverRequestQuery, setServerRequestQuery] = useState('');
   const [cart, setCart] = useState([]);
   const [customer, setCustomer] = useState('');
   const [discountRp, setDiscountRp] = useState('');
@@ -156,6 +163,58 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const q = filters.search.trim();
+    if (!q || !getSession()?.token) {
+      setServerRows(null);
+      setServerRowQuery('');
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.rows({ q, sort: 'expires', order: 'asc' })
+        .then((rows) => { if (!cancelled) { setServerRows(rows); setServerRowQuery(q); } })
+        .catch(() => { if (!cancelled) { setServerRows(null); setServerRowQuery(''); } });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [filters.search]);
+
+  useEffect(() => {
+    const q = posQuery.trim();
+    if (!q || !getSession()?.token) {
+      setServerPosIds(null);
+      setServerPosQuery('');
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.products({ q, sort: 'name', order: 'asc' })
+        .then((list) => {
+          if (cancelled) return;
+          setServerPosIds(new Set(list.map((item) => String(item.id))));
+          setServerPosQuery(q.toLocaleLowerCase('id-ID'));
+        })
+        .catch(() => { if (!cancelled) { setServerPosIds(null); setServerPosQuery(''); } });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [posQuery]);
+
+  useEffect(() => {
+    const q = requestQuery.trim();
+    if (!q || !getSession()?.token) {
+      setServerRequests(null);
+      setServerRequestQuery('');
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.requests({ q, sort: 'created', order: 'desc' })
+        .then((list) => { if (!cancelled) { setServerRequests(list); setServerRequestQuery(q); } })
+        .catch(() => { if (!cancelled) { setServerRequests(null); setServerRequestQuery(''); } });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [requestQuery]);
 
   const mutate = async (promise) => {
     const res = await promise;
@@ -244,9 +303,13 @@ export default function Dashboard() {
     ...(pendingRequests.length && isAdmin ? [{ label: 'Permintaan restok', detail: `${pendingRequests.length} permintaan menunggu tinjauan`, target: 'restok' }] : []),
     ...(shippedPending.length ? [{ label: 'Kiriman tiba', detail: `${shippedPending.length} kiriman menunggu konfirmasi penerimaan`, target: 'restok' }] : []),
   ];
-  const filteredRows = scopedRows.filter((row) => {
-    const query = filters.search.toLocaleLowerCase('id-ID').trim();
-    return (!query || `${storeName(row.storeId)} ${productName(row.productId)} ${row.batch}`.toLocaleLowerCase('id-ID').includes(query))
+  const stockQuery = filters.search.trim();
+  const stockFromServer = Boolean(stockQuery) && serverRowQuery === stockQuery && Array.isArray(serverRows);
+  const stockSource = stockFromServer ? serverRows : scopedRows;
+  const filteredRows = stockSource.filter((row) => {
+    const query = stockQuery.toLocaleLowerCase('id-ID');
+    const textOk = stockFromServer || !query || `${storeName(row.storeId)} ${productName(row.productId)} ${row.batch}`.toLocaleLowerCase('id-ID').includes(query);
+    return textOk
       && (filters.store === 'semua' || row.storeId === filters.store)
       && (filters.product === 'semua' || row.productId === filters.product)
       && (filters.status === 'semua' || statusesFor(row, scopedRows, data.settings).includes(filters.status))
@@ -265,7 +328,10 @@ export default function Dashboard() {
   });
   const realStockOf = (productId) => realStockFor(data.rows, productId, selectedStore);
   const posQueryNorm = posQuery.toLocaleLowerCase('id-ID').trim();
-  const posList = !posQueryNorm ? posBaseCatalog : posBaseCatalog.filter((item) => item.name.toLocaleLowerCase('id-ID').includes(posQueryNorm));
+  const useServerPos = Boolean(posQueryNorm) && serverPosQuery === posQueryNorm && serverPosIds instanceof Set;
+  const posList = !posQueryNorm ? posBaseCatalog : posBaseCatalog.filter((item) => (
+    useServerPos ? serverPosIds.has(String(item.id)) : item.name.toLocaleLowerCase('id-ID').includes(posQueryNorm)
+  ));
   const cartDetailed = cart.map((line) => {
     const found = posBaseCatalog.find((item) => item.id === line.productId);
     return { ...line, name: found?.name || 'Produk tidak tersedia', price: found?.price || 0, stock: found?.stock ?? 0 };
@@ -419,9 +485,13 @@ export default function Dashboard() {
   }
 
   function restock() {
-    if (!scopedRequests.length) return <section><Heading title={t.nav.restok} detail={isAdmin ? 'Pesanan staf yang sudah dibayar. Setujui untuk diproduksi, atau tolak.' : 'Pesanan Anda ke pusat. Pantau status hingga kiriman tiba.'} /><EmptyState title="Belum ada permintaan" detail={isAdmin ? 'Pesanan dari gerai akan muncul di sini.' : 'Buat pesanan melalui menu Pesan Stok.'} /></section>;
-    return <section><Heading title={t.nav.restok} detail={isAdmin ? 'Pesanan staf yang sudah dibayar. Setujui untuk diproduksi, atau tolak.' : 'Pesanan Anda ke pusat. Pantau status hingga kiriman tiba.'} />
-      <div className="hb-request-grid">{scopedRequests.map((request) => {
+    const query = requestQuery.trim();
+    const fromServer = Boolean(query) && serverRequestQuery === query && Array.isArray(serverRequests);
+    const shown = fromServer ? serverRequests.map(normalizeRequest) : scopedRequests;
+    const search = <label className="d-block mb-3"><span className="visually-hidden">Cari pesanan</span><input className="form-control" type="search" placeholder="Cari pelanggan, struk, atau status" value={requestQuery} onChange={(event) => setRequestQuery(event.target.value)} /></label>;
+    if (!shown.length) return <section><Heading title={t.nav.restok} detail={isAdmin ? 'Pesanan staf yang sudah dibayar. Setujui untuk diproduksi, atau tolak.' : 'Pesanan Anda ke pusat. Pantau status hingga kiriman tiba.'} />{search}<EmptyState title="Belum ada permintaan" detail={isAdmin ? 'Pesanan dari gerai akan muncul di sini.' : 'Buat pesanan melalui menu Pesan Stok.'} /></section>;
+    return <section><Heading title={t.nav.restok} detail={isAdmin ? 'Pesanan staf yang sudah dibayar. Setujui untuk diproduksi, atau tolak.' : 'Pesanan Anda ke pusat. Pantau status hingga kiriman tiba.'} />{search}
+      <div className="hb-request-grid">{shown.map((request) => {
         const lines = requestLines(request);
         return <article className="hb-panel" key={request.id}><div className="hb-section-heading"><div><h3 className="h6 mb-1">{request.receiptId || request.id.slice(0, 8)}</h3><p className="hb-muted mb-0">{storeName(request.storeId)} · {dateLabel(request.created)}{request.method ? ` · ${request.method}` : ''}{request.customer ? ` · ${request.customer}` : ''}</p></div><Status label={st(request.status)} tone={toneFor(request.status)} /></div>
           <ul className="hb-simple-list">{lines.map((line) => <li key={line.productId}><strong>{line.name}</strong><span className="hb-muted">{number.format(line.qty)} × {money(line.price)}</span></li>)}</ul>

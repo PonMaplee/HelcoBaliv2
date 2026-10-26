@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ProductCard from './ProductCard';
+import { fetchAllPublicProducts } from '../lib/productsApi';
 
 /**
  * [TAG: COMPONENT_PRODUCT_CAROUSEL]
@@ -18,13 +19,8 @@ export default function ProductCarousel() {
    */
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/products', { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('Produk tidak tersedia');
-        return response.json();
-      })
+    fetchAllPublicProducts(controller.signal)
       .then((products) => {
-        if (!Array.isArray(products)) throw new Error('Format produk tidak dikenal');
         setFeaturedProducts(products.filter((item) => item?.processing !== 'Merchandise' && item?.roast !== 'Accessory'));
         setStatus('ready');
       })

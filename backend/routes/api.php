@@ -22,7 +22,7 @@ Route::prefix('dashboard')->group(function () {
     Route::post('/login', [DashboardController::class, 'login']);
 
     // Butuh token
-    Route::middleware('api.token')->group(function () {
+    Route::middleware('jwt')->group(function () {
         Route::get('/me', [DashboardController::class, 'me']);
 
         // Katalog produk

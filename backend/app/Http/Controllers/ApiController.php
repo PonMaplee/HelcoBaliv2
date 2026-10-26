@@ -3,34 +3,37 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
+use App\Support\ApiQuery;
+use Illuminate\Http\Request;
 
 /**
  * [TAG: API_CONTROLLER]
- * Controller utama yang menangani REST API produk publik.
- * Didesain tanpa banyak pemisahan file untuk menjaga keringkasan kode (Clean Code).
+ * REST API produk publik (Home / Explore).
  */
 class ApiController extends Controller
 {
     /**
      * [TAG: GET_PRODUCTS]
-     * Mengambil seluruh daftar produk dari database MongoDB.
-     * Fungsi ini digunakan untuk menampilkan carousel di halaman Home dan daftar produk di halaman Explore.
+     * Daftar produk. Mendukung page, per_page, q, sort, dan order.
      */
-    public function getProducts()
+    public function getProducts(Request $request)
     {
-        return response()->json(Product::all());
+        $query = Product::query();
+        ApiQuery::whereText($query, $request, ['title', 'origin', 'notes', 'roast']);
+        ApiQuery::applySort($query, $request, ['title', 'price', 'origin', 'roast'], 'title', 'asc');
+
+        return ApiQuery::paginate($query, $request);
     }
 
     /**
      * [TAG: GET_PRODUCT_BY_ID]
-     * Mengambil detail spesifik dari satu produk berdasarkan ID integer-nya.
-     * Fungsi ini merender informasi produk pada halaman Product Detail.
+     * Detail satu produk. 404 bila id tidak ada.
      */
     public function getProductById($id)
     {
         $product = Product::where('_id', (int) $id)->first();
 
-        if (!$product) {
+        if (! $product) {
             return response()->json(['message' => 'Produk tidak ditemukan'], 404);
         }
 

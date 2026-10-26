@@ -28,6 +28,7 @@ async function request(method, path, body) {
     method,
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
       ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -41,20 +42,45 @@ async function request(method, path, body) {
   return data;
 }
 
+function withQuery(path, params = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') qs.set(key, String(value));
+  });
+  const query = qs.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+/** Walk page/per_page until meta.last_page so callers still receive the full list. */
+export async function fetchAll(path, params = {}) {
+  const perPage = 100;
+  let page = 1;
+  let lastPage = 1;
+  const all = [];
+  do {
+    const body = await request('GET', withQuery(path, { ...params, page, per_page: perPage }));
+    const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
+    all.push(...rows);
+    lastPage = Number(body?.meta?.last_page || 1);
+    page += 1;
+  } while (page <= lastPage);
+  return all;
+}
+
 export const api = {
   request,
   // auth
   login: (email, password) => request('POST', '/login', { email, password }),
   register: (payload) => request('POST', '/register', payload),
   me: () => request('GET', '/me'),
-  // reads
-  products: () => request('GET', '/products'),
-  stores: () => request('GET', '/stores'),
-  rows: () => request('GET', '/rows'),
-  requests: () => request('GET', '/requests'),
-  production: () => request('GET', '/production'),
-  shifts: () => request('GET', '/shifts'),
-  activities: () => request('GET', '/activities'),
+  // reads — every page, so the dashboard calculations still see the full set
+  products: (params) => fetchAll('/products', { sort: 'name', order: 'asc', ...params }),
+  stores: (params) => fetchAll('/stores', { sort: 'name', order: 'asc', ...params }),
+  rows: (params) => fetchAll('/rows', { sort: 'expires', order: 'asc', ...params }),
+  requests: (params) => fetchAll('/requests', { sort: 'created', order: 'desc', ...params }),
+  production: (params) => fetchAll('/production', { sort: 'expires', order: 'asc', ...params }),
+  shifts: (params) => fetchAll('/shifts', { sort: 'date', order: 'desc', ...params }),
+  activities: (params) => fetchAll('/activities', { sort: 'date', order: 'desc', ...params }),
   settings: () => request('GET', '/settings'),
   // mutations
   createProduct: (body) => request('POST', '/products', body),

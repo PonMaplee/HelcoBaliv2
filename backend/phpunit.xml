@@ -23,9 +23,17 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
-        <env name="DB_URL" value=""/>
+        <env name="APP_KEY" value="base64:YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=" force="true"/>
+        <env name="JWT_SECRET" value="test-jwt-secret" force="true"/>
+        <env name="JWT_TTL" value="60" force="true"/>
+        <env name="ADMIN_EMAIL" value="admin@helcobali.id" force="true"/>
+        <env name="ADMIN_PASSWORD" value="admin123" force="true"/>
+        <env name="DB_CONNECTION" value="mongodb" force="true"/>
+        <env name="DB_HOST" value="127.0.0.1" force="true"/>
+        <env name="DB_PORT" value="27017" force="true"/>
+        <env name="DB_DATABASE" value="helco_test" force="true"/>
+        <env name="DB_URL" value="" force="true"/>
+        <env name="DB_DSN" value="" force="true"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

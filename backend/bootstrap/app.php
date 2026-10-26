@@ -12,13 +12,27 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        __DIR__.'/../app/Console/Commands',
+    ])
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->api(append: [
+            \App\Http\Middleware\SanitizeInput::class,
+        ]);
         $middleware->alias([
-            'api.token' => \App\Http\Middleware\ApiToken::class,
+            'jwt' => \App\Http\Middleware\JwtAuthenticate::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+        $exceptions->render(function (\Illuminate\Validation\ValidationException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'errors' => $e->errors(),
+                ], 400);
+            }
+        });
     })->create();

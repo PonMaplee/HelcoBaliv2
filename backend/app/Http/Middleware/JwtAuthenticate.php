@@ -2,21 +2,21 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\User;
+use App\Services\JwtService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Autentikasi token bearer sederhana untuk dashboard B2B.
- * Token dibuat saat login/register dan disimpan di kolom api_token user.
+ * Requires Authorization: Bearer <jwt>. Missing or invalid tokens return 401.
  */
-class ApiToken
+class JwtAuthenticate
 {
+    public function __construct(private JwtService $jwt) {}
+
     public function handle(Request $request, Closure $next): Response
     {
-        $token = $request->bearerToken();
-        $user = $token ? User::where('api_token', $token)->first() : null;
+        $user = $this->jwt->userFromToken($request->bearerToken());
 
         if (! $user) {
             return response()->json(['message' => 'Tidak terautentikasi.'], 401);

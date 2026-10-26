@@ -11,14 +11,15 @@ use App\Models\ShiftReport;
 use App\Models\StockRow;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\JwtService;
+use App\Support\ApiQuery;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 /**
  * Backend penuh untuk dashboard kemitraan (B2B).
  * Logika bisnis (FEFO, approve→produksi, kirim, terima, shift, ralat)
- * dipindah dari dashboardModel.js ke sini. Auth token bearer sederhana.
+ * dipindah dari dashboardModel.js ke sini. Auth memakai JWT Bearer.
  */
 class DashboardController extends Controller
 {
@@ -45,10 +46,10 @@ class DashboardController extends Controller
 
         $email = strtolower(trim($data['email']));
         if (User::where('email', $email)->exists()) {
-            return response()->json(['message' => 'Email sudah terdaftar. Silakan masuk.'], 422);
+            return response()->json(['message' => 'Email sudah terdaftar. Silakan masuk.'], 400);
         }
         if (Store::where('name', 'regex', '/^'.preg_quote(trim($data['storeName']), '/').'$/i')->exists()) {
-            return response()->json(['message' => 'Nama gerai sudah terdaftar.'], 422);
+            return response()->json(['message' => 'Nama gerai sudah terdaftar.'], 400);
         }
 
         $store = Store::create([
@@ -64,10 +65,13 @@ class DashboardController extends Controller
             'password' => $data['password'],
             'storeId' => (string) $store->id,
             'role' => 'staff',
-            'api_token' => Str::random(60),
         ]);
 
-        return response()->json(['user' => $user, 'store' => $store, 'token' => $user->api_token], 201);
+        return response()->json([
+            'user' => $user,
+            'store' => $store,
+            'token' => app(JwtService::class)->issue($user),
+        ], 201);
     }
 
     public function login(Request $request)
@@ -79,13 +83,13 @@ class DashboardController extends Controller
 
         $user = User::where('email', strtolower(trim($data['email'])))->first();
         if (! $user || ! Hash::check($data['password'], $user->password)) {
-            return response()->json(['message' => 'Email atau kata sandi salah.'], 422);
+            return response()->json(['message' => 'Email atau kata sandi salah.'], 401);
         }
 
-        $user->api_token = Str::random(60);
-        $user->save();
-
-        return response()->json(['user' => $user, 'token' => $user->api_token]);
+        return response()->json([
+            'user' => $user,
+            'token' => app(JwtService::class)->issue($user),
+        ]);
     }
 
     public function me(Request $request)
@@ -101,8 +105,11 @@ class DashboardController extends Controller
     public function products(Request $request)
     {
         $this->ensureSeeded();
+        $query = CatalogProduct::query();
+        ApiQuery::whereText($query, $request, ['name', 'origin', 'notes', 'roast']);
+        ApiQuery::applySort($query, $request, ['name', 'price', 'origin'], 'name', 'asc');
 
-        return response()->json(CatalogProduct::orderBy('name')->get());
+        return ApiQuery::paginate($query, $request);
     }
 
     public function storeProduct(Request $request)
@@ -121,7 +128,7 @@ class DashboardController extends Controller
 
         $name = trim($data['name']);
         if (CatalogProduct::where('name', 'regex', '/^'.preg_quote($name, '/').'$/i')->exists()) {
-            return response()->json(['message' => 'Produk tersebut sudah dicatat.'], 422);
+            return response()->json(['message' => 'Produk tersebut sudah dicatat.'], 400);
         }
 
         $product = CatalogProduct::create(array_merge($data, ['name' => $name]));
@@ -152,7 +159,7 @@ class DashboardController extends Controller
         $clash = CatalogProduct::where('name', 'regex', '/^'.preg_quote($name, '/').'$/i')
             ->where('_id', '!=', $id)->exists();
         if ($clash) {
-            return response()->json(['message' => 'Produk tersebut sudah dicatat.'], 422);
+            return response()->json(['message' => 'Produk tersebut sudah dicatat.'], 400);
         }
 
         $product->fill(array_merge($data, ['name' => $name]))->save();
@@ -167,7 +174,7 @@ class DashboardController extends Controller
             || RestockRequest::where('productId', $id)->exists()
             || ProductionBatch::where('productId', $id)->exists();
         if ($inUse) {
-            return response()->json(['message' => 'Produk sedang dipakai dan tidak bisa dihapus.'], 422);
+            return response()->json(['message' => 'Produk sedang dipakai dan tidak bisa dihapus.'], 400);
         }
         CatalogProduct::find($id)?->delete();
 
@@ -191,8 +198,10 @@ class DashboardController extends Controller
         if ($user->role !== 'admin') {
             $query->where('_id', $user->storeId);
         }
+        ApiQuery::whereText($query, $request, ['name', 'location', 'status', 'ownerEmail']);
+        ApiQuery::applySort($query, $request, ['name', 'status', 'location'], 'name', 'asc');
 
-        return response()->json($query->orderBy('name')->get());
+        return ApiQuery::paginate($query, $request);
     }
 
     public function approveStore(Request $request, $id)
@@ -215,12 +224,11 @@ class DashboardController extends Controller
 
     public function rows(Request $request)
     {
-        $query = StockRow::query();
-        if ($request->user()->role !== 'admin') {
-            $query->where('storeId', $request->user()->storeId);
-        }
+        $query = $this->rowQuery($request);
+        $this->searchRows($query, $request);
+        ApiQuery::applySort($query, $request, ['expires', 'batch', 'created', 'physical'], 'expires', 'asc');
 
-        return response()->json($query->get());
+        return ApiQuery::paginate($query, $request);
     }
 
     public function storeRow(Request $request)
@@ -235,7 +243,7 @@ class DashboardController extends Controller
         ]);
 
         if (StockRow::where('batch', $data['batch'])->where('storeId', $data['storeId'])->exists()) {
-            return response()->json(['message' => 'Batch sudah tercatat pada gerai ini.'], 422);
+            return response()->json(['message' => 'Batch sudah tercatat pada gerai ini.'], 400);
         }
 
         StockRow::create([
@@ -252,19 +260,21 @@ class DashboardController extends Controller
             'created' => $this->todayISO(),
         ]);
 
-        return response()->json(['rows' => $this->scopedRows($request)]);
+        return response()->json(['rows' => $this->scopedRows($request)], 201);
     }
 
     // ───────────────────────── Pesanan (restok / POS) ─────────────────────────
 
     public function requests(Request $request)
     {
-        $query = RestockRequest::query();
-        if ($request->user()->role !== 'admin') {
-            $query->where('storeId', $request->user()->storeId);
+        $query = $this->requestQuery($request);
+        ApiQuery::whereText($query, $request, ['customer', 'receiptId', 'status', 'note']);
+        if ($request->filled('status')) {
+            $query->where('status', (string) $request->query('status'));
         }
+        ApiQuery::applySort($query, $request, ['created', 'status', 'total', 'receiptId'], 'created', 'desc');
 
-        return response()->json($query->get());
+        return ApiQuery::paginate($query, $request);
     }
 
     public function storeRequest(Request $request)
@@ -329,11 +339,14 @@ class DashboardController extends Controller
         $data = $request->validate(['expires' => 'required|date']);
 
         $req = RestockRequest::find($id);
-        if (! $req || $req->status !== 'Diajukan') {
-            return response()->json(['message' => 'Permintaan tidak valid.'], 422);
+        if (! $req) {
+            return response()->json(['message' => 'Permintaan tidak ditemukan.'], 404);
+        }
+        if ($req->status !== 'Diajukan') {
+            return response()->json(['message' => 'Permintaan tidak valid.'], 400);
         }
         if ($this->daysUntil($data['expires']) < 0) {
-            return response()->json(['message' => 'Tanggal kedaluwarsa batch belum valid.'], 422);
+            return response()->json(['message' => 'Tanggal kedaluwarsa batch belum valid.'], 400);
         }
 
         $lines = $this->normalizeLines($req);
@@ -364,8 +377,11 @@ class DashboardController extends Controller
     {
         $this->adminOnly($request);
         $req = RestockRequest::find($id);
-        if (! $req || $req->status !== 'Produksi') {
-            return response()->json(['message' => 'Permintaan belum siap dikirim.'], 422);
+        if (! $req) {
+            return response()->json(['message' => 'Permintaan tidak ditemukan.'], 404);
+        }
+        if ($req->status !== 'Produksi') {
+            return response()->json(['message' => 'Permintaan belum siap dikirim.'], 400);
         }
 
         $lines = $this->normalizeLines($req);
@@ -385,7 +401,7 @@ class DashboardController extends Controller
         foreach ($lines as $line) {
             $alloc = $this->allocateFEFO($pool, $line['productId'], $line['qty']);
             if ($alloc === null) {
-                return response()->json(['message' => 'Produksi belum cukup untuk dikirim.'], 422);
+                return response()->json(['message' => 'Produksi belum cukup untuk dikirim.'], 400);
             }
             foreach ($alloc as $a) {
                 $flat[] = $a + [
@@ -414,15 +430,18 @@ class DashboardController extends Controller
     {
         $user = $request->user();
         $req = RestockRequest::find($id);
-        if (! $req || $req->storeId !== $user->storeId || $req->status !== 'Dikirim') {
-            return response()->json(['message' => 'Kiriman tidak valid.'], 422);
+        if (! $req) {
+            return response()->json(['message' => 'Permintaan tidak ditemukan.'], 404);
+        }
+        if ($req->storeId !== $user->storeId || $req->status !== 'Dikirim') {
+            return response()->json(['message' => 'Kiriman tidak valid.'], 400);
         }
 
         $breakdown = $request->validate(['lines' => 'required|array'])['lines'];
         $shipped = $this->shippedLines($req);
         $error = $this->validateReceiptLines($shipped, $breakdown);
         if ($error) {
-            return response()->json(['message' => $error], 422);
+            return response()->json(['message' => $error], 400);
         }
 
         $date = $this->todayISO();
@@ -489,7 +508,18 @@ class DashboardController extends Controller
 
     public function production(Request $request)
     {
-        return response()->json($this->scopedProduction($request));
+        if ($request->user()->role !== 'admin') {
+            return ApiQuery::emptyPage($request);
+        }
+
+        $query = ProductionBatch::query();
+        ApiQuery::whereText($query, $request, ['batch', 'status']);
+        if ($request->filled('status')) {
+            $query->where('status', (string) $request->query('status'));
+        }
+        ApiQuery::applySort($query, $request, ['expires', 'batch', 'status', 'created'], 'expires', 'asc');
+
+        return ApiQuery::paginate($query, $request);
     }
 
     public function storeProduction(Request $request)
@@ -503,7 +533,7 @@ class DashboardController extends Controller
         ]);
 
         if (ProductionBatch::where('batch', $data['batch'])->exists()) {
-            return response()->json(['message' => 'Nomor batch produksi sudah tercatat.'], 422);
+            return response()->json(['message' => 'Nomor batch produksi sudah tercatat.'], 400);
         }
 
         ProductionBatch::create([
@@ -518,7 +548,7 @@ class DashboardController extends Controller
             'status' => 'Diseduh',
         ]);
 
-        return response()->json(['production' => $this->scopedProduction($request)]);
+        return response()->json(['production' => $this->scopedProduction($request)], 201);
     }
 
     public function markReady(Request $request, $id)
@@ -533,12 +563,11 @@ class DashboardController extends Controller
 
     public function shifts(Request $request)
     {
-        $query = ShiftReport::query();
-        if ($request->user()->role !== 'admin') {
-            $query->where('storeId', $request->user()->storeId);
-        }
+        $query = $this->shiftQuery($request);
+        ApiQuery::whereText($query, $request, ['note', 'date']);
+        ApiQuery::applySort($query, $request, ['date', 'difference', 'actualTotal'], 'date', 'desc');
 
-        return response()->json($query->get());
+        return ApiQuery::paginate($query, $request);
     }
 
     public function storeShift(Request $request)
@@ -580,15 +609,18 @@ class DashboardController extends Controller
             'shiftReports' => $this->scopedShifts($request),
             'rows' => $this->scopedRows($request),
             'activities' => $this->scopedActivities($request),
-        ]);
+        ], 201);
     }
 
     public function reviseShift(Request $request, $id)
     {
         $user = $request->user();
         $report = ShiftReport::find($id);
-        if (! $report || $report->storeId !== $user->storeId) {
-            return response()->json(['message' => 'Laporan ini milik gerai lain atau tidak ditemukan.'], 422);
+        if (! $report) {
+            return response()->json(['message' => 'Laporan tidak ditemukan.'], 404);
+        }
+        if ($report->storeId !== $user->storeId) {
+            return response()->json(['message' => 'Laporan ini milik gerai lain.'], 403);
         }
 
         $data = $request->validate([
@@ -610,7 +642,7 @@ class DashboardController extends Controller
             $oldQty = $oldByProduct[$line['productId']] ?? 0;
             $available = $this->realStockFor($storeId, $line['productId']) + $oldQty;
             if ($line['qty'] > $available) {
-                return response()->json(['message' => 'Jumlah terjual melebihi stok gerai.'], 422);
+                return response()->json(['message' => 'Jumlah terjual melebihi stok gerai.'], 400);
             }
         }
 
@@ -657,7 +689,14 @@ class DashboardController extends Controller
 
     public function activities(Request $request)
     {
-        return response()->json($this->scopedActivities($request));
+        $query = $this->activityQuery($request);
+        ApiQuery::whereText($query, $request, ['batch', 'kind', 'note']);
+        if ($request->filled('kind')) {
+            $query->where('kind', (string) $request->query('kind'));
+        }
+        ApiQuery::applySort($query, $request, ['date', 'kind', 'quantity'], 'date', 'desc');
+
+        return ApiQuery::paginate($query, $request);
     }
 
     public function settings(Request $request)
@@ -845,7 +884,7 @@ class DashboardController extends Controller
         foreach ($lines as $line) {
             $stock = $this->realStockFor($storeId, $line['productId']);
             if ($line['qty'] > $stock) {
-                abort(422, 'Jumlah terjual melebihi stok gerai.');
+                abort(400, 'Jumlah terjual melebihi stok gerai.');
             }
         }
     }
@@ -926,24 +965,84 @@ class DashboardController extends Controller
 
     // ── Scoped list untuk respons patch (admin: semua; staff: miliknya) ──
 
-    private function scopedRows(Request $request)
+    private function rowQuery(Request $request)
     {
         $query = StockRow::query();
         if ($request->user()->role !== 'admin') {
             $query->where('storeId', $request->user()->storeId);
         }
 
-        return $query->get();
+        return $query;
     }
 
-    private function scopedRequests(Request $request)
+    private function searchRows($query, Request $request): void
+    {
+        $term = trim((string) $request->query('q', ''));
+        if ($term === '') {
+            return;
+        }
+
+        $pattern = ApiQuery::pattern($term);
+        $productIds = CatalogProduct::query()
+            ->where(function ($inner) use ($pattern) {
+                $inner->where('name', 'regex', $pattern)
+                    ->orWhere('origin', 'regex', $pattern)
+                    ->orWhere('notes', 'regex', $pattern);
+            })
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+        $storeIds = Store::where('name', 'regex', $pattern)->pluck('id')->map(fn ($id) => (string) $id)->all();
+
+        $query->where(function ($inner) use ($pattern, $productIds, $storeIds) {
+            $inner->where('batch', 'regex', $pattern);
+            if ($productIds !== []) {
+                $inner->orWhereIn('productId', $productIds);
+            }
+            if ($storeIds !== []) {
+                $inner->orWhereIn('storeId', $storeIds);
+            }
+        });
+    }
+
+    private function requestQuery(Request $request)
     {
         $query = RestockRequest::query();
         if ($request->user()->role !== 'admin') {
             $query->where('storeId', $request->user()->storeId);
         }
 
-        return $query->get();
+        return $query;
+    }
+
+    private function shiftQuery(Request $request)
+    {
+        $query = ShiftReport::query();
+        if ($request->user()->role !== 'admin') {
+            $query->where('storeId', $request->user()->storeId);
+        }
+
+        return $query;
+    }
+
+    private function activityQuery(Request $request)
+    {
+        $query = Activity::query();
+        if ($request->user()->role !== 'admin') {
+            $query->where('storeId', $request->user()->storeId);
+        }
+
+        return $query;
+    }
+
+    private function scopedRows(Request $request)
+    {
+        return $this->rowQuery($request)->get();
+    }
+
+    private function scopedRequests(Request $request)
+    {
+        return $this->requestQuery($request)->get();
     }
 
     private function scopedProduction(Request $request)
@@ -958,22 +1057,12 @@ class DashboardController extends Controller
 
     private function scopedActivities(Request $request)
     {
-        $query = Activity::query();
-        if ($request->user()->role !== 'admin') {
-            $query->where('storeId', $request->user()->storeId);
-        }
-
-        return $query->get();
+        return $this->activityQuery($request)->get();
     }
 
     private function scopedShifts(Request $request)
     {
-        $query = ShiftReport::query();
-        if ($request->user()->role !== 'admin') {
-            $query->where('storeId', $request->user()->storeId);
-        }
-
-        return $query->get();
+        return $this->shiftQuery($request)->get();
     }
 
     // ── Seeding idempotent (admin + katalog + settings) ──
@@ -983,8 +1072,8 @@ class DashboardController extends Controller
         if (! User::where('role', 'admin')->exists()) {
             User::create([
                 'name' => 'Administrator',
-                'email' => 'admin@helcobali.id',
-                'password' => 'admin123',
+                'email' => config('helco.admin_email'),
+                'password' => config('helco.admin_password'),
                 'storeId' => null,
                 'role' => 'admin',
             ]);

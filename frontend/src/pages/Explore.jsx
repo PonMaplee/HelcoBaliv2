@@ -18,6 +18,7 @@ import { Link } from 'react-router-dom';
 import NavHashLink from '../components/NavHashLink';
 import SEO from '../components/SEO';
 import { fadeUp, staggerContainer } from '../lib/animations';
+import { fetchAllPublicProducts } from '../lib/productsApi';
 
 const MotionDiv = motion.div;
 const PRODUCT_SIZES = ['250', '500'];
@@ -58,13 +59,9 @@ export default function Explore({ t, lang }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/products', { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('Produk tidak tersedia');
-        return response.json();
-      })
+    fetchAllPublicProducts(controller.signal)
       .then((list) => {
-        const items = (Array.isArray(list) ? list : [])
+        const items = list
           .filter((p) => p?.processing !== 'Merchandise' && p?.roast !== 'Accessory')
           .map((p) => ({
             id: p.id ?? p._id,

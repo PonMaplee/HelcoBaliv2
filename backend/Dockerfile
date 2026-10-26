@@ -17,4 +17,4 @@ EXPOSE 8000
 
 # ponytail: db:seed tiap start (free tier ga ada Shell). Aman — Product cuma 5 seed & ga diubah app,
 # seedDashboard idempotent. Data B2B (CatalogProduct, stok, user) ga ke-truncate.
-CMD ["sh", "-c", "php artisan migrate --force && php artisan db:seed --force && php artisan serve --host=0.0.0.0 --port=$PORT"]
+CMD ["sh", "-c", "php artisan migrate --force && php artisan mongo:indexes && php artisan db:seed --force && php artisan serve --host=0.0.0.0 --port=$PORT"]

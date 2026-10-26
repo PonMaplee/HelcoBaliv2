@@ -104,8 +104,8 @@ class DatabaseSeeder extends Seeder
         if (! \App\Models\User::where('role', 'admin')->exists()) {
             \App\Models\User::create([
                 'name' => 'Administrator',
-                'email' => 'admin@helcobali.id',
-                'password' => 'admin123',
+                'email' => config('helco.admin_email'),
+                'password' => config('helco.admin_password'),
                 'storeId' => null,
                 'role' => 'admin',
             ]);
