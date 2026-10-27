@@ -37,7 +37,7 @@ class OpenApiSpecTest extends TestCase
         sort($apiDocumented);
 
         $this->assertSame($registered, $apiDocumented);
-        $this->assertCount(30, $registered);
+        $this->assertCount(31, $registered);
         $this->assertContains('get /docs', $documented);
         $this->assertContains('get /openapi.yaml', $documented);
     }

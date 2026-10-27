@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Models\Activity;
 use App\Models\CatalogProduct;
 use App\Models\Product;
+use App\Models\ProductionBatch;
 use App\Models\RestockRequest;
+use App\Models\ShiftReport;
 use App\Models\StockRow;
 use App\Models\Store;
 use App\Models\User;
@@ -16,7 +19,7 @@ class SrsApiTest extends TestCase
     {
         parent::setUp();
 
-        foreach ([User::class, Store::class, CatalogProduct::class, StockRow::class, RestockRequest::class, Product::class] as $model) {
+        foreach ([User::class, Store::class, CatalogProduct::class, StockRow::class, RestockRequest::class, Product::class, ProductionBatch::class, ShiftReport::class, Activity::class] as $model) {
             $model::query()->delete();
         }
     }
@@ -179,6 +182,100 @@ class SrsApiTest extends TestCase
         });
 
         $this->assertContains('email_1', $names);
+    }
+
+    public function test_fefo_shipment_receipt_and_shift_revision_keep_stock(): void
+    {
+        $store = Store::create([
+            'name' => 'Gerai Stok',
+            'location' => 'Ubud',
+            'status' => 'Disetujui',
+            'ownerEmail' => 'stok@example.com',
+        ]);
+        User::create([
+            'name' => 'Administrator',
+            'email' => 'admin@helcobali.id',
+            'password' => 'admin123',
+            'role' => 'admin',
+            'storeId' => null,
+        ]);
+        User::create([
+            'name' => 'Sari Stok',
+            'email' => 'stok@example.com',
+            'password' => 'secret1',
+            'role' => 'staff',
+            'storeId' => (string) $store->id,
+        ]);
+        $product = CatalogProduct::create(['name' => 'Uji FEFO', 'price' => 10000]);
+        $productId = (string) $product->id;
+        $storeId = (string) $store->id;
+
+        $adminToken = $this->postJson('/api/dashboard/login', [
+            'email' => 'admin@helcobali.id',
+            'password' => 'admin123',
+        ])->assertOk()->json('token');
+        $staffToken = $this->postJson('/api/dashboard/login', [
+            'email' => 'stok@example.com',
+            'password' => 'secret1',
+        ])->assertOk()->json('token');
+
+        $requestId = $this->withToken($staffToken)->postJson('/api/dashboard/requests', [
+            'method' => 'Tunai',
+            'total' => 50000,
+            'lines' => [['productId' => $productId, 'qty' => 5, 'price' => 10000]],
+        ])->assertCreated()->json('requests.0.id');
+
+        $this->withToken($adminToken)->postJson("/api/dashboard/requests/{$requestId}/approve", [
+            'expires' => '2099-01-01',
+        ])->assertOk();
+
+        $this->withToken($adminToken)->postJson('/api/dashboard/production', [
+            'productId' => $productId,
+            'batch' => 'EARLY-FEFO',
+            'quantity' => 3,
+            'expires' => '2098-06-01',
+        ])->assertCreated();
+
+        $batches = $this->withToken($adminToken)->getJson('/api/dashboard/production?per_page=100')->json('data');
+        foreach ($batches as $batch) {
+            $this->withToken($adminToken)->patchJson('/api/dashboard/production/'.$batch['id'].'/ready')->assertOk();
+        }
+
+        $shipped = $this->withToken($adminToken)->postJson("/api/dashboard/requests/{$requestId}/ship")->assertOk();
+        $allocations = collect($shipped->json('requests'))->firstWhere('id', $requestId)['allocations'];
+        $this->assertCount(2, $allocations);
+        $this->assertStringStartsWith('2098-06-01', (string) $allocations[0]['expires']);
+        $this->assertSame(3, (int) $allocations[0]['quantity']);
+        $this->assertSame(2, (int) $allocations[1]['quantity']);
+
+        $this->withToken($staffToken)->postJson("/api/dashboard/requests/{$requestId}/receive", [
+            'lines' => [['productId' => $productId, 'good' => 5, 'retur' => 0]],
+        ])->assertOk();
+        $this->assertSame(5, (int) StockRow::where('storeId', $storeId)->where('productId', $productId)->sum('physical'));
+
+        $this->withToken($staffToken)->postJson('/api/dashboard/shifts', [
+            'lines' => [['productId' => $productId, 'qty' => 2, 'price' => 1000]],
+            'actualTotal' => 2500,
+        ])->assertCreated();
+        $this->assertSame(3, (int) StockRow::where('storeId', $storeId)->where('productId', $productId)->sum('physical'));
+
+        $this->withToken($staffToken)->postJson('/api/dashboard/shifts', [
+            'lines' => [['productId' => $productId, 'qty' => 99, 'price' => 1000]],
+            'actualTotal' => 0,
+        ])->assertStatus(400);
+
+        $reportId = (string) ShiftReport::where('storeId', $storeId)->first()->id;
+        $revised = $this->withToken($staffToken)->postJson("/api/dashboard/shifts/{$reportId}/revise", [
+            'lines' => [['productId' => $productId, 'qty' => 1, 'price' => 1000]],
+            'actualTotal' => 1000,
+            'note' => 'ralat',
+        ])->assertOk();
+        $this->assertSame(4, (int) StockRow::where('storeId', $storeId)->where('productId', $productId)->sum('physical'));
+        $this->assertSame(1, (int) collect($revised->json('shiftReports'))->firstWhere('id', $reportId)['editCount']);
+
+        $this->withToken($adminToken)->getJson('/api/dashboard/snapshot')
+            ->assertOk()
+            ->assertJsonPath('user.role', 'admin');
     }
 
     private function staffPayload(): array

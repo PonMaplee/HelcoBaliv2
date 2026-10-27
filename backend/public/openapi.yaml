@@ -179,6 +179,21 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/dashboard/snapshot:
+    get:
+      tags: [Auth]
+      operationId: dashboardSnapshot
+      summary: Dashboard payload in one response
+      description: |
+        Staff see only their store, stock, requests, shifts, and activities.
+        Production is included for admins and is an empty list for staff.
+        The same seeding as `GET /products` runs when the admin or catalog is missing.
+      responses:
+        '200':
+          description: User, store, and the full dashboard lists.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/dashboard/products:
     get:
       tags: [Catalog]

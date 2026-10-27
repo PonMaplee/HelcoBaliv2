@@ -1,67 +1,68 @@
 # RUN.md — Remake Helco
 
-Monorepo with two apps:
+Backend Laravel (port 8000) and the React storefront (port 5173) both have to be up. The storefront proxies `/api` to the backend.
 
+| App | URL |
+|-----|-----|
+| Storefront | http://127.0.0.1:5173/ |
+| API | http://127.0.0.1:8000/api/products |
+| Swagger | http://127.0.0.1:8000/docs |
+| Admin | `admin@helcobali.id` / `admin123` |
+
+## Run again (already set up)
+
+MongoDB must already be listening on `127.0.0.1:27017`. Two terminals, from the repo root:
+
+```powershell
+cd backend
+php artisan serve --host=127.0.0.1 --port=8000
 ```
-remake helco/
-├── backend/    Laravel 13 API (MongoDB) — products
-└── frontend/   React 19 + Vite storefront (kopi-premium-web)
+
+```powershell
+cd frontend
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-The frontend proxies `/api/*` to the backend, so **both must run**.
+Skip `composer install`, `npm install`, migrate, and seed on a normal restart.
 
-## Prerequisites
+## First time only
 
-| Tool | Version |
-|------|---------|
-| PHP | ^8.3 with the **mongodb** extension (`php -m` must list `mongodb`) |
-| Composer | 2.x |
-| Node.js + npm | Node 18+ |
-| MongoDB | running on `127.0.0.1:27017` |
+Needs PHP 8.3+ with the `mongodb` extension (`php -m` lists `mongodb`), Composer 2, Node 18+, and MongoDB on `127.0.0.1:27017` with no username.
 
-## 1. Backend
-
-```bash
+```powershell
 cd backend
 composer install
-copy .env.example .env        # Windows — on macOS/Linux use: cp .env.example .env
+copy .env.example .env
 php artisan key:generate
 ```
 
-Edit `.env` so the database points to MongoDB:
+`.env.example` already points at local MongoDB and uses file sessions, so a fresh copy does not look for SQL tables. Leave `JWT_SECRET` empty. The signer uses `APP_KEY`. `JWT_TTL` is the token lifetime in minutes (1440 = 24 hours). `FRONTEND_URL` is the link on the API home page.
 
-```
-DB_CONNECTION=mongodb
-DB_HOST=127.0.0.1
-DB_PORT=27017
-DB_DATABASE=helco_db
-```
-
-Then migrate, create Mongo indexes, seed, and serve:
-
-```bash
+```powershell
 php artisan migrate --force
 php artisan mongo:indexes
 php artisan db:seed --force
 php artisan serve --host=127.0.0.1 --port=8000
 ```
 
-`mongo:indexes` is idempotent. The Docker start command runs it after migrate. It no-ops unless `DB_CONNECTION=mongodb`.
+`mongo:indexes` is safe to repeat. An existing admin user is not overwritten. `ADMIN_PASSWORD` is hashed on insert; if it is unset, the seed still uses `admin123`.
 
-Set these in `.env` before the first seed:
-
-```
-JWT_SECRET=change-me
-JWT_TTL=1440
-ADMIN_EMAIL=admin@helcobali.id
-ADMIN_PASSWORD=admin123
+```powershell
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-`JWT_TTL` is the access-token lifetime in minutes (1440 = 24 hours). Tokens are HS256 JWTs from `firebase/php-jwt`, sent as `Authorization: Bearer`. If `JWT_SECRET` is empty, the signer uses `APP_KEY`. `ADMIN_PASSWORD` is the first-run admin password and is stored hashed. When the variable is unset, the seed falls back to `admin123` so a fresh database can still sign in at `admin@helcobali.id`. An existing admin user is not overwritten.
+## When something fails
 
-## API list parameters
+- **`Class "MongoDB\..." not found`** — enable the PHP mongodb extension, then `composer install` again.
+- **Empty product list** — MongoDB is stopped, `DB_HOST` is not `127.0.0.1` (a value of `mongo` only works inside Docker), or the first-time seed was skipped.
+- **Frontend network error** — the API on port 8000 is down. Vite only forwards `/api`.
+- **Port already in use** — the app is already running, or pass another `--port`.
 
-`GET` collections return `{ "data": [], "meta": { "current_page", "per_page", "total", "last_page" } }`.
+## API shape
+
+Collection `GET`s return `{ "data": [], "meta": { "current_page", "per_page", "total", "last_page" } }`.
 
 | Param | Meaning |
 |-------|---------|
@@ -71,56 +72,24 @@ ADMIN_PASSWORD=admin123
 | `sort` | Allow-listed field |
 | `order` | `asc` or `desc` |
 
-Main lists: public `GET /api/products` (`sort` title, price, origin, roast), dashboard `GET /api/dashboard/products`, `/rows` (stock batches), `/requests`, and `/production`. Invalid input on `/api/*` returns **400** with `{ message, errors }`. Creates return **201**. Missing records return **404**. Missing or invalid JWT returns **401**. Staff calling an admin route returns **403**.
+Public `GET /api/products` accepts `sort` of title, price, origin, or roast. Dashboard lists: `/api/dashboard/products`, `/rows`, `/requests`, `/production`. Bad input on `/api/*` is **400**. Creates are **201**. Missing records are **404**. A missing or invalid JWT is **401**. Staff calling an admin route is **403**.
 
-## API docs
-
-Swagger UI is `GET /docs` (for example `http://127.0.0.1:8000/docs`). The OpenAPI 3 document is `GET /openapi.yaml`. Both are served by Laravel, and the same YAML is also at `backend/public/openapi.yaml` for a static file server.
-
-A backend-free copy lives in `docs/` (`index.html` loads `./openapi.yaml`) for GitHub Pages.
+Swagger UI is `GET /docs`. The OpenAPI file is `GET /openapi.yaml` and `backend/public/openapi.yaml`. A static copy is in `docs/`.
 
 ## Tests
 
-PHPUnit uses the Mongo database `helco_test` on `127.0.0.1:27017` (see `backend/phpunit.xml`).
+PHPUnit uses the Mongo database `helco_test` on `127.0.0.1:27017`.
 
-```bash
+```powershell
 cd backend
 php artisan test
 ```
 
-## Load test
+Load test, with the API already running:
 
-With the API already running:
-
-```bash
+```powershell
 cd backend
 php scripts/loadtest.php
 ```
 
-Optional: `LOAD_URL`, `LOAD_CONCURRENCY` (default 10), `LOAD_REQUESTS` (default 40). The script prints min, average, p95, and max response times.
-
-Sanity check: `http://127.0.0.1:8000/api/products` should return JSON.
-
-## 2. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-Open `http://127.0.0.1:5173/`.
-
-## Ports
-
-| App | URL |
-|-----|-----|
-| Frontend | http://127.0.0.1:5173/ |
-| Backend API | http://127.0.0.1:8000/api |
-
-## Troubleshooting
-
-- **`Class "MongoDB\..." not found` / driver errors** → install/enable the PHP mongodb extension, then `composer install` again.
-- **Empty product list** → MongoDB isn't running, `.env` still points elsewhere, or you skipped `db:seed`.
-- **Frontend shows network errors** → backend on `:8000` must be up; the Vite proxy (`frontend/vite.config.js`) forwards `/api` there.
-- **Port already in use** → stop the old process or pass a different `--port`.
+Optional env: `LOAD_URL`, `LOAD_CONCURRENCY` (default 10), `LOAD_REQUESTS` (default 40).

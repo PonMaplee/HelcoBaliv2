@@ -9,4 +9,7 @@ return [
     'jwt_secret' => env('JWT_SECRET'),
     // Token lifetime in minutes. 1440 = 24 hours.
     'jwt_ttl' => (int) env('JWT_TTL', 1440),
+
+    // Linked from the API home page. The shop itself is the React app.
+    'frontend_url' => env('FRONTEND_URL', 'http://127.0.0.1:5173'),
 ];

@@ -13,6 +13,7 @@ use App\Models\Store;
 use App\Models\User;
 use App\Services\JwtService;
 use App\Support\ApiQuery;
+use App\Support\CoffeeCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -24,13 +25,6 @@ use Illuminate\Support\Facades\Hash;
 class DashboardController extends Controller
 {
     const STORE_STATUS = ['Diajukan', 'Disetujui', 'Ditolak'];
-
-    // Katalog pusat (3 kopi) — cermin CENTRAL_CATALOG di dashboardModel.js.
-    const CENTRAL_CATALOG = [
-        ['name' => 'LA KINTAMANI', 'price' => 120000, 'image' => '/product-kintamani.jpg', 'notes' => 'Citrus, Floral, Bright Acidity', 'roast' => 'Light Roast', 'origin' => 'Kintamani', 'descId' => 'Single origin dari dataran tinggi Kintamani. Proses washed menonjolkan citrus cerah dan aroma floral — seduhan pagi yang menyegarkan.', 'descEn' => 'Single origin from the Kintamani highlands. The washed process highlights bright citrus and delicate floral aroma — a refreshing morning brew.'],
-        ['name' => 'LA PLAGA', 'price' => 135000, 'image' => '/product-plaga.jpg', 'notes' => 'Dark Chocolate, Brown Sugar, Bold', 'roast' => 'Medium-Dark Roast', 'origin' => 'Plaga Highlands', 'descId' => 'Signature house blend untuk seduhan harian. Fermentasi anaerobic natural memberi body syrupy, buah beri gelap, dan finish cokelat mewah.', 'descEn' => 'The signature house blend for the perfect daily brew. Anaerobic natural fermentation brings syrupy body, dark berries, and a luxurious chocolate finish.'],
-        ['name' => 'LA PUPUAN', 'price' => 110000, 'image' => '/product-pupuan.jpg', 'notes' => 'Earthy, Nutty, Full Body', 'roast' => 'Medium Roast', 'origin' => 'Pupuan', 'descId' => 'Klasik robust dari tanah subur Pupuan. Full-bodied dengan earthy dan nutty yang menenangkan — cocok dipadukan susu.', 'descEn' => 'A robust classic from the rich soils of Pupuan. Full-bodied with comforting earthy and nutty undertones — stands up well to milk.'],
-    ];
 
     // ───────────────────────── Auth ─────────────────────────
 
@@ -98,6 +92,31 @@ class DashboardController extends Controller
         $store = $user->storeId ? Store::find($user->storeId) : null;
 
         return response()->json(['user' => $user, 'store' => $store]);
+    }
+
+    public function snapshot(Request $request)
+    {
+        $this->ensureSeeded();
+        $user = $request->user();
+        $store = $user->storeId ? Store::find($user->storeId) : null;
+        $stores = $user->role === 'admin'
+            ? Store::orderBy('name')->get()
+            : Store::where('_id', $user->storeId)->get();
+
+        return response()->json([
+            'user' => $user,
+            'store' => $store,
+            'data' => [
+                'products' => CatalogProduct::orderBy('name')->get(),
+                'stores' => $stores,
+                'rows' => $this->scopedRows($request),
+                'requests' => $this->scopedRequests($request),
+                'production' => $this->scopedProduction($request),
+                'shiftReports' => $this->scopedShifts($request),
+                'activities' => $this->scopedActivities($request),
+                'settings' => $this->getSettings(),
+            ],
+        ]);
     }
 
     // ───────────────────────── Katalog produk ─────────────────────────
@@ -1086,7 +1105,7 @@ class DashboardController extends Controller
 
     private function seedCentralCatalog(): void
     {
-        foreach (self::CENTRAL_CATALOG as $seed) {
+        foreach (CoffeeCatalog::dashboard() as $seed) {
             $existing = CatalogProduct::where('name', $seed['name'])->first();
             if ($existing) {
                 $existing->fill([

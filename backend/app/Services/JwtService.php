@@ -65,6 +65,6 @@ class JwtService
             return $key;
         }
 
-        return 'helco-dev-jwt-secret';
+        throw new \RuntimeException('JWT secret is not configured. Set JWT_SECRET or APP_KEY.');
     }
 }

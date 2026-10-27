@@ -24,6 +24,7 @@ Route::prefix('dashboard')->group(function () {
     // Butuh token
     Route::middleware('jwt')->group(function () {
         Route::get('/me', [DashboardController::class, 'me']);
+        Route::get('/snapshot', [DashboardController::class, 'snapshot']);
 
         // Katalog produk
         Route::get('/products', [DashboardController::class, 'products']);

@@ -2,7 +2,6 @@
 // Tidak ada state management; cukup fetch + token bearer di localStorage.
 
 export const SESSION_KEY = 'helcobali-auth-session-v1';
-export const DASH_LANG_KEY = 'helcobali-dashboard-lang-v1';
 
 const BASE = '/api/dashboard';
 
@@ -102,33 +101,13 @@ export const api = {
   updateSettings: (body) => request('PUT', '/settings', body),
 };
 
-// Muat semua entity + user saat ini, lalu rakit jadi satu blob `data`.
+// Satu permintaan. Daftar terfilter tetap memakai api.* yang berjalan per halaman.
 export async function loadDashboard() {
-  const [products, stores, rows, requests, production, shifts, activities, settings, me] =
-    await Promise.all([
-      api.products(),
-      api.stores(),
-      api.rows(),
-      api.requests(),
-      api.production(),
-      api.shifts(),
-      api.activities(),
-      api.settings(),
-      api.me(),
-    ]);
+  const body = await request('GET', '/snapshot');
 
   return {
-    user: me.user,
-    store: me.store,
-    data: {
-      products,
-      stores,
-      rows,
-      requests,
-      production,
-      shiftReports: shifts,
-      activities,
-      settings,
-    },
+    user: body.user,
+    store: body.store,
+    data: body.data,
   };
 }
